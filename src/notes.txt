@@ -1,0 +1,11 @@
+Downloaded from 
+https://bitsavers.org/bits/DEC/pdp11/papertapeimages/DEC-11-LPTBA-B-PB_disassembly
+
+Unlike the title of the archive it is not the original PTS BASIC but is instead
+a slightly more modern implementation. More like RT11's BASIC-11.
+It includes features, such as string handling which were missing from othe original
+PTS BASIC; and other features such as use of assembly language extensions have been
+significantly altered.
+
+This is the starting point for the PTSBASIC-TK, a standalone PDP-11 papertape basic
+with Tektronix 4014 extensions.

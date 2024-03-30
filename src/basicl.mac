@@ -1,0 +1,5440 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;BASICL BASIC INTERPRETER FOR DEC PDP-11
+;DEC-11-LPTBA-B
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+        .TITLE BASICL
+
+        R0=%0
+        R1=%1
+        R2=%2
+        R3=%3
+        R4=%4
+        R5=%5
+        SP=%6
+        PC=%7
+;
+;GLOBAL'S DEFINED IN FPMP11
+;
+        .GLOBL $POLSH,$IR,$MLR,$DVR
+        .GLOBL $ADR,$SBR,SIN,COS,SQRT,ALOG
+        .GLOBL ATAN,EXP,$ERVEC,ERRFPU,IFPMP
+;
+;GLOBAL'S DEFINED IN BASICH
+;
+        .GLOBL USRARE
+;
+;GLOBAL'S DEFINED IN BASICL
+;
+        .GLOBL EVAL,OPERAT,ERRSX5,ERRARG
+        .GLOBL FLTOFX,ARGB,SOPRAT,INT
+        .GLOBL NUMSGN,MAKEST,STPRO,TABLE5
+        .GLOBL TBL5EN,START,SAVCHA,VAL
+        .GLOBL NORM,QUOTBM,HICORE,SAVCHA
+	.GLOBL .RPRN,.COMA
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;ASSEMBLY PARAMETERS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	.IFNDF $PRBSZ
+	$PRBSZ = 30
+	.ENDC
+;
+	.IFNDF $PPBSZ
+	$PPBSZ = 30
+	.ENDC
+;
+	.IFNDF $LPBSZ
+	$LPBSZ = 40
+	.ENDC
+;
+;	$NOPOW = 1	;no power fail restart
+;	$NOSTR = 1	;no strings
+;	$NOPTP = 1	;no high speed reader
+;	$NOLPT = 1	;no line printer 
+;	$LONGER = 1	;long error strings
+;	$LSI11 = 1	;processor is LSI11
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;USER AREA STORAGE OFFSETS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+SYMBLS =0        ;POINTER TO FIRST SYMBOL
+LIMIT  =SYMBLS+2 ;POINTER TO HIGEST WORD OF USER AREA
+PDL    =LIMIT+2  ;ADDRESS OF EMPTY STACK
+PDSIZE =PDL+2    ;LOW LIMIT OF STACK
+ARRAYS =PDSIZE+2 ;ADDRESS OF HIGHEST WORD OF ARRAYS
+HIFREE =ARRAYS+2 ;ADDRESS OF HIGHEST FREE WORD
+LOFREE =HIFREE+2 ;ADDRESS OF LOWEST FREE WORD
+CODE   =LOFREE+2 ;ADDRESS OF TOKENIZED CODE
+LINE   =CODE+2   ;ADDRESS OF USER LINE BUFFER
+VARSAV =LINE+2   ;VAR SAVE FOR ASSIGNMENT
+SS1SAV =VARSAV+2 ;SS1 SAVE FOR ASSIGNMENT
+SS2SAV =SS1SAV+2 ;SS2 SAVE FOR ASSIGNMENT
+LINENO =SS2SAV+2 ;LINE NUMBER
+GSBCTR =LINENO+2 ;ACTIVE GOSUB COUNT
+COLUMN =GSBCTR+2 ;POINTER TO COLUMN COUNTER
+CLMNTT =COLUMN+2 ;TTY COLUMN COUNTER
+FAC1   =CLMNTT+2 ;FLOATING VALUE (MSW)
+FAC2   =FAC1+2   ;FLOATING VALUE (LSW)
+R0SAVE =FAC2+2   ;R0 SAVE WHILE IN FPMP
+R1SAVE =R0SAVE+2 ;R1 SAVE 
+R2SAVE =R1SAVE+2 ;R2 SAVE
+R3SAVE =R2SAVE+2 ;R3 SAVE
+R4SAVE =R3SAVE+2 ;R4 SAVE
+T1     =R4SAVE+2 ;TEMP STORAGE
+T2     =T1+2     ;TEMP STORAGE
+T3     =T2+2     ;TEMP STORAGE
+RND1   =T3+2     ;RANDOM NUMBER (MSW)
+RND2   =RND1+2   ;RANDOM NUMBER (LSW)
+RNDCT  =RND2+2   ;RANDOMIZER (COUNTER)
+LOSTR  =RNDCT+2  ;LOW STRING LIMIT
+HISTR  =LOSTR+2  ;HIGH STRING LIMIT
+ODEV   =HISTR+2  ;OUTPUT DEVICE
+IDEV   =ODEV+1   ;INPUT DEVICE
+TPHD   =IDEV+1   ;TELEPRINTER HEADER POINTER
+KBHD   =TPHD+2   ;KEYBOARD HEADER POINTER
+ECHOSP =KBHD+2   ;NEXT ECHO POINTER
+CNCFLG =ECHOSP+2 ;CONTROL 'C' FLAG
+CNOFLG =CNCFLG+1 ;CONTROL 'O' FLAG
+FILLCO =CNOFLG+1 ;FILL COUNT
+FILLNO =FILLCO+1 ;NUMBER OF FILL CHARACTERS
+FILLCH =FILLNO+1 ;CHARACTER NEEDING FILL
+XOFFLG =FILLCH+1 ;XOFF FLAG
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;TOKEN VALUES
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+.EOL   = 201
+.END   = .EOL+1   ;
+.FOR   = .END+1   ;
+.GOSUB = .FOR+1   ;
+.GOTO  = .GOSUB+1 ;
+.ON    = .GOTO+1  ;jcl
+.IF    = .ON+1    ;
+.INP   = .IF+1    ;
+.LET   = .INP+1   ;
+.NEXT  = .LET+1   ;
+.PRN   = .NEXT+1  ;
+.RET   = .PRN+1   ;
+.STOP  = .RET+1   ;
+.DIM   = .STOP+1  ;
+.RAND  = .DIM+1   ;
+.REST  = .RAND+1  ;
+.REM   = .REST+1  ;
+.DEF   = .REM+1   ;
+.READ  = .DEF+1   ;
+.DATA  = .READ+1  ;
+.CALL  = .DATA+1  ;
+.POKE  = .CALL+1  ;
+.EOF   = .POKE+1  ;
+.AMPER = .EOF+1   ;
+.UPARO = .AMPER+1 ;
+.STAR  = .UPARO+1 ;
+.SLASH = .STAR+1  ;
+.PLUS  = .SLASH+1 ;
+.UNARY = .PLUS+1  ;
+.MINUS = .UNARY+1 ;
+.TERM  = .MINUS+1 ;
+.SEMI  = .TERM+1  ;
+.RPRN  = .SEMI+1  ;
+.TO    = .RPRN+1  ;
+.STEP  = .TO+1    ;
+.THEN  = .STEP+1  ;
+.COMA  = .THEN+1  ;
+.LE    = .COMA+1  ;
+.EL    = .LE+1    ;
+.GE    = .EL+1    ;
+.EG    = .GE+1    ;
+.NE    = .EG+1    ;
+.GL    = .NE+1    ;
+.LT    = .GL+1    ;
+.GT    = .LT+1    ;
+.EQ    = .GT+1    ;
+.LPRN  = .EQ+1    ;
+.DQUOT = .LPRN+1  ;
+.SQUOT = .DQUOT+1 ;
+.COLN  = .SQUOT+1 ;
+.PND   = .COLN+1  ;
+.FN    = .PND+1   ;
+;
+;TABLE 5 ENTRIES (FUNCTIONS)
+.RNDL  = .FN+1    ;
+.RND   = .RNDL+1  ;
+.SIN   = .RND+1   ;
+.COS   = .SIN+1   ;
+.SQR   = .COS+1   ;
+.ATN   = .SQR+1   ;
+.EXP   = .ATN+1   ;
+.LOG   = .EXP+1   ;
+.PEEK  = .LOG+1   ;
+.FREE  = .PEEK+1  ;
+.ABS   = .FREE+1  ;
+.INT   = .ABS+1   ;
+.SGN   = .INT+1   ;
+.TAB   = .SGN+1   ;
+	.IFNDF $NOSTR
+.LEN   = .TAB+1   ;
+.ASC   = .LEN+1   ;
+.CHR   = .ASC+1   ;
+.POS   = .CHR+1   ;
+.SEG   = .POS+1   ;
+.VAL   = .SEG+1   ;
+.STR   = .VAL+1   ;
+	.ENDC
+;
+;TABLE4 ENTRIES (IMMEDIATE COMMANDS)
+	.IFNDF $NOSTR
+.LIST  = .STR+1   ;
+	.ENDC
+;
+	.IFDF $NOSTR
+.LIST  = .TAB+1
+	.ENDC
+;
+.RUN   = .LIST+1  ;
+.SAVE  = .RUN+1   ;
+.OLD   = .SAVE+1  ;
+.SCR   = .OLD+1   ;
+.CLE   = .SCR+1   ;
+;
+.FLIT  = 374
+.ILIT1 = 375
+.ILIT2 = 376
+.TEXT  = 377
+;
+;ASSORTED CONSTANTS
+;
+LFCHR = 12
+FFCHR = 14
+CRET = 15
+SPACE = 40
+MAXCOL = 110
+;
+PS = 177776	;CPU STATUS REGISTER
+;
+TKS = 177560	;TELEPRINTER KEYBOARD STATUS
+TKB = 177562	;TELEPRINTER KEYBOARD BUFFER
+TPS = 177564	;TELEPRINTER PRINTER STATUS
+TPB = 177566	;TELEPRINTER PRINTER BUFFER
+;
+PRS = 177550	;PAPER TAPE READER STATUS
+PRB = 177552	;PAPER TAPE READER BUFFER
+PPS = 177554	;PAPER TAPE PUNCH STATUS
+PPB = 177556	;PAPER TAPE PUNCH BUFFER
+;
+LPS = 177514	;LINE PRINTER STATUS
+LPB = 177516	;LINE PRINTER BUFFER
+;
+.SCALR = 177775
+.NVAR = 177776
+.SVAR = 177777
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SYSTEM VECTORS AND LOW CORE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        .ASECT
+        .=0
+        JMP START
+
+        .WORD  000006     ;TIMEOUT ERROR
+        HALT
+
+        .WORD  000012     ;RESERVED INSTRUCTION
+        HALT
+
+        .WORD  000016     ;DEBUG TRAP
+        HALT
+
+        .WORD BOMB        ;IO TRAP HANDLER
+        .WORD  000000
+
+	.IFNDF $NOPOW
+        .WORD  POWDWN     ;POWER FAIL HANDLER
+        .WORD  0
+	.ENDC
+;
+	.IFDF $NOPOW
+	.WORD .+2
+	HALT
+	.ENDC
+;
+        .WORD  000032     ;EMT TRAP
+        HALT
+
+        .WORD  000036     ;TRAP TRAP
+        HALT
+;
+; SYSTEM AREA
+;
+        .BYTE 1,'A      ;VERSION INFORMATION
+;
+        .WORD 0
+        .WORD 0
+        .WORD 0		;ADDRESS OF 'CALL' TABLE
+SYSIDL: .WORD 0		;SYSTEM IDLE PROCESS
+        .WORD 0
+        .WORD 0
+        .WORD 0
+;
+;INTERRUPT VECTORS
+;
+	.=60
+        .WORD  KBINT     ;KEYBOARD
+        .WORD 200
+
+        .WORD  TPINT     ;TERMINAL/PRINTER
+        .WORD 200
+
+;
+	.=70
+	.IFNDF $NOPTP
+        .WORD  PTRINT    ;PAPER TAPE READER
+        .WORD 200
+        .WORD  PTPINT    ;PAPER TAPE PUNCH
+        .WORD 200
+	.ENDC
+;
+	.IFDF $NOPTP
+	.WORD 0,0,0,0
+	.ENDC
+;
+	.=100
+        .WORD 102
+        RTI
+
+        .=200
+	.IFNDF $NOLPT
+        .WORD  LPINT     ;LINE PRINTER
+        .WORD 200
+	.ENDC
+;
+	.IFDF $NOLPT
+	.WORD 0,0
+	.ENDC
+;
+        .=240
+        .WORD 242
+        HALT
+
+        .WORD ERRFPU      ;FLOATING POINT TRAP
+        .WORD 0
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+;START OF CODE
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        .=400
+;
+CLMNPP: .WORD 0		;PAPER TAPE PUNCH COLUMN
+CLMNLP: .WORD 0		;LINE PRINTER COLUMN
+HICORE: .WORD 0		;HIGEST CORE ADDRESS
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;KEYWORD LOOKUP TABLES
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+KEYWDS: 
+        .ASCII '+'
+	.BYTE .PLUS
+        .ASCII '-'
+	.BYTE .MINUS
+        .ASCII '*'
+	.BYTE .STAR
+        .ASCII '/'
+	.BYTE .SLASH
+        .ASCII '^'
+	.BYTE .UPARO
+        .ASCII '('
+	.BYTE .LPRN
+        .ASCII ')'
+	.BYTE .RPRN
+        .ASCII '\'
+	.BYTE .EOL
+        .ASCII '&'
+	.BYTE .AMPER
+        .ASCII ';'
+	.BYTE .SEMI
+        .ASCII ','
+	.BYTE .COMA
+        .ASCII '<='
+	.BYTE .LE
+        .ASCII '=<'
+	.BYTE .LE
+        .ASCII '>='
+	.BYTE .GE
+        .ASCII '=>'
+	.BYTE .GE
+        .ASCII '<>'
+	.BYTE .NE
+        .ASCII '><'
+	.BYTE .NE
+        .ASCII '<'
+	.BYTE .LT
+        .ASCII '>'
+	.BYTE .GT
+        .ASCII '='
+	.BYTE .EQ
+        .ASCII '"'
+	.BYTE .DQUOT
+        .ASCII "'"
+	.BYTE .SQUOT
+        .ASCII ':'
+	.BYTE .COLN
+        .ASCII '#'
+	.BYTE .PND
+        .ASCII '['
+	.BYTE .LPRN
+        .ASCII ']'
+	.BYTE .RPRN
+;
+KEYA:   .ASCII 'LET '
+        .BYTE .LET
+        .ASCII 'IF '
+        .BYTE .IF
+        .ASCII 'GO TO '
+        .BYTE .GOTO
+        .ASCII 'ON '
+        .BYTE .ON
+        .ASCII 'FOR '
+        .BYTE .FOR
+        .ASCII ' TO '
+        .BYTE .TO
+        .ASCII 'NEXT '
+        .BYTE .NEXT
+        .ASCII ' THEN '
+        .BYTE .THEN
+        .ASCII ' STEP '
+        .BYTE .STEP
+        .ASCII 'GOSUB '
+        .BYTE .GOSUB
+        .ASCII 'RETURN'
+        .BYTE .RET
+        .ASCII 'INPUT '
+        .BYTE .INP
+        .ASCII 'PRINT '
+        .BYTE .PRN
+        .ASCII 'REM'
+        .BYTE .REM
+        .ASCII 'DEF '
+        .BYTE .DEF
+        .ASCII 'READ '
+        .BYTE .READ
+        .ASCII 'DATA '
+        .BYTE .DATA
+        .ASCII 'CALL '
+        .BYTE .CALL
+        .ASCII 'FN'
+        .BYTE .FN
+        .ASCII 'RND('
+        .BYTE .RNDL
+        .ASCII 'RND'
+        .BYTE .RND
+        .ASCII 'SIN('
+        .BYTE .SIN
+        .ASCII 'COS('
+        .BYTE .COS
+        .ASCII 'SQR('
+        .BYTE .SQR
+        .ASCII 'ATN('
+        .BYTE .ATN
+        .ASCII 'EXP('
+        .BYTE .EXP
+        .ASCII 'LOG('
+        .BYTE .LOG
+        .ASCII 'ABS('
+        .BYTE .ABS
+        .ASCII 'INT('
+        .BYTE .INT
+        .ASCII 'SGN('
+        .BYTE .SGN
+        .ASCII 'TAB('
+        .BYTE .TAB
+        .ASCII 'POKE'
+        .BYTE .POKE
+        .ASCII 'PEEK('
+        .BYTE .PEEK
+        .ASCII 'FRE('
+        .BYTE .FREE
+;
+	.IFNDF $NOSTR
+        .ASCII 'LEN('
+        .BYTE .LEN
+        .ASCII 'ASC('
+        .BYTE .ASC
+        .ASCII 'CHR$('
+        .BYTE .CHR
+        .ASCII 'POS('
+        .BYTE .POS
+        .ASCII 'SEG$('
+        .BYTE .SEG
+        .ASCII 'VAL('
+        .BYTE .VAL
+        .ASCII 'STR$('
+        .BYTE .STR
+	.ENDC
+;
+        .ASCII 'DIM '
+        .BYTE .DIM
+        .ASCII 'RANDOMIZE'
+        .BYTE .RAND
+        .ASCII 'RESTORE'
+        .BYTE .REST
+        .ASCII 'STOP'
+        .BYTE .STOP
+        .ASCII 'END'
+        .BYTE .END
+        .ASCII 'LIST'
+        .BYTE .LIST
+        .ASCII 'RUN'
+        .BYTE .RUN
+        .ASCII 'SAVE'
+        .BYTE .SAVE
+        .ASCII 'OLD'
+        .BYTE .OLD
+        .ASCII 'SCR'
+        .BYTE .SCR
+        .ASCII 'CLE'
+        .BYTE .CLE
+        .BYTE 0
+        .EVEN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;COLD START ENTRY POINT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+START:  MOV USRARE,R5		;POINT TO USER SPACE
+        MOV PDL(R5),SP		;INIT STACK
+        CLR ECHOSP(R5)
+        JSR PC,BUFCLR		;CLEAR I/O BUFFERS
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;COMMAND: SCRATCH
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SCRACH: MOV PDL(R5),SP
+        JSR PC,INITSC		;INIT SOURCE
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;COMMAND: CLEAR
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+CLEAR:  JSR PC,CLRVAR		;CLEAR VARIABLES
+        BR READY
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;READY - COMMANDS RETURN HERE 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+READY0: JSR PC,BUFCLR		;CLEAR I/O BUFFERS
+READY:  MOV PDL(R5),SP		;INIT STACK
+        CLR CNCFLG(R5)		;RESET ^C AND ^O FLAGS
+        CLR ODEV(R5)		;SET I/O DEVICE TO TTY
+        MOV #CLMNTT,COLUMN(R5)	;RESET COLUMN 
+        ADD R5,COLUMN(R5)
+        JSR R1,MSG		;PRINT READY MESSAGE
+        .BYTE 15,12
+        .ASCII 'READY'
+        .BYTE 0
+        .EVEN
+READY2: MOV PDL(R5),SP
+        JSR R1,MSG		;PRINT NEW LINE
+        .BYTE 15,12,12,0
+        .EVEN
+;
+IOINIT: CLR ODEV(R5)		;SET I/O DEVICE TO TTY
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;EDIT - GET A LINE AND CONVERT TO TOKENS
+; MOVE LINE TO USER CODE SPACE
+; CREATE ENTRIES IN SYMBOL TABLE, STRING SPACE
+; AND ARRAYS 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+EDIT:   JSR PC,LINGET		;GET A LINE
+        BCC EDITLI		;NORMAL INPUT LINE
+        CMPB @CODE(R5),#.EOF	;PROGRAM IN CODE SPACE?
+        BNE READY0		;THEN GOTO READY
+        JMP DEVERR		;ELSE DEVICE ERROR
+;
+EDITLI: JSR PC,TRAN		;TRANSLATE LINE TO TOKENS
+        INC R1
+        MOV R1,-(SP)
+        MOV LINE(R5),R1
+        SUB R1,(SP)
+        MOVB(R1)+,R0
+        BMI EDIMME
+        SWAB R0
+        BISB(R1)+,R0
+        ADD(R5),R0
+        CMP(R0),#.SCALR
+        BCC EDIMME
+        MOV CODE(R5),R1
+        CMP(SP),#3		;3 BYTES IS EQ EMPTY LINE
+        BNE EDSRCH		;LINE NUMBER AND CR, MEANS DELETE
+        CLR(SP)
+        CLR 2(R0)
+        BR EDSRCH
+EDIMME: TSTB IDEV(R5)
+        BNE EDIT		;IGNORE IMMED STATEMENT FROM NON TTY
+        JMP IMMED		;EXECUTE IMMEDIATE COMMAND
+;
+EDSKIP: JSR PC,SKIPEL
+EDSRCH: MOV R1,R4
+        CMPB(R1),#.EOF
+        BEQ EDIPUT
+        MOVB(R1),R3
+        BMI EDSKIP
+        INC R1
+        SWAB R3
+        BISB(R1)+,R3
+        ADD(R5),R3
+        CMP(R3),#.SCALR
+        BCC EDSKIP
+        CMP(R0),(R3)
+        BHI EDSKIP
+        BNE EDIPUT
+EDPASS: JSR PC,SKIPEL
+        CMPB(R1),#.EOF
+        BEQ EDOVER
+        MOVB(R1),R3
+        BMI EDPASS
+        INC R1
+        SWAB R3
+        BISB(R1)+,R3
+        ADD(R5),R3
+        CMP(R3),#.SCALR
+        BCC EDPASS
+        SUB #2,R1
+        MOV PDL(R5),R0
+        MOV GSBCTR(R5),R2
+EDICHG: CMP(R0),R4
+        BLOS .+10
+        CMP(R0),R1
+        BHI .+4
+        CLR(R0)
+        TST(R0)+
+        DEC R2
+        BGT EDICHG
+EDOVER: SUB R4,R1
+        BR .+4
+EDIPUT: CLR R1
+        SUB(SP),R1
+        MOV PDL(R5),R0
+        MOV GSBCTR(R5),R2
+EDMODF: CMP(R0),R4
+        BCS .+4
+        SUB R1,(R0)
+        TST(R0)+
+        DEC R2
+        BGT EDMODF
+        TST R1
+        BMI EDIGRO
+        BEQ EDSAME
+EDCONT: MOV R4,R2
+        ADD(SP),R2
+        MOV R2,R3
+        ADD R1,R3
+EDMOVE: MOVB(R3)+,(R2)+
+        CMP R3,(R5)
+        BCS EDMOVE
+        TSTB -(R2)
+        BEQ .+4
+        INC R2
+        BIT R2,#1
+        BEQ .+4
+        CLRB(R2)+
+        MOV R2,(R5)
+        MOV(R3)+,(R2)+
+        CMP R3,LOFREE(R5)
+        BCS .-6
+        MOV R2,LOFREE(R5)
+        BR .+4
+        CLR(R2)+
+        CMP R2,R3
+        BCS .-4
+        BR EDSAME
+EDIGRO: MOV(R5),R0
+        TSTB -(R0)
+        BEQ .+4
+        INC R0
+        SUB R1,R0
+        MOV R0,R3
+        INC R3
+        BIC #1,R3
+        SUB(R5),R3
+        ADD LOFREE(R5),R3
+        CMP R3,HIFREE(R5)
+        BLOS .+6
+ERROV1: JMP ERROV2
+;
+	.IFNDF $NOSTR
+        MOV R3,R2
+        TST(R2)+
+        CMP R2,LOSTR(R5)
+        BCS EDROOM
+        JSR PC,UPPACK
+        CMP R2,LOSTR(R5)
+        BCC ERROV1
+	.ENDC
+;
+EDROOM: MOV LOFREE(R5),R2
+        MOV R3,LOFREE(R5)
+        BR .+4
+EDMVUP: MOV -(R2),-(R3)
+        CMP R2,(R5)
+        BHI EDMVUP
+        MOV R3,(R5)
+        CLRB -(R3)
+        MOV R0,R2
+        ADD R1,R0
+        BR .+4
+        MOVB -(R0),-(R2)
+        CMP R0,R4
+        BHI .-4
+EDSAME: MOV LINE(R5),R0
+        MOV R4,R1
+        MOV(SP)+,R2
+        BR .+4
+        MOVB(R0)+,(R4)+
+        DEC R2
+        BGE .-4
+EDRLC8: CMPB(R1),#.EOF
+        BEQ EDJUMP
+        MOVB(R1),R2
+        BMI EDRLOC
+        INC R1
+        SWAB R2
+        BISB(R1)+,R2
+        ADD(R5),R2
+        CMP(R2)+,#.SCALR
+        BCC EDRLOC
+        MOV R1,(R2)
+        SUB #2,(R2)
+EDRLOC: JSR PC,SKIPEL
+        BR EDRLC8
+EDJUMP: JMP EDIT
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;EXECUTE IMMEDIATE COMMAND
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+IMMED:  MOV(SP)+,R0		;R0 HAS COMMAND LENGTH (IN BYTES)
+        CLR ODEV(R5)		;IMMED ONLY FROM TTY
+        MOV PDSIZE(R5),R4
+        MOV LINE(R5),R1		;GET POINTER TO FIRST TOKEN
+        CLR R2
+        BISB(R1),R2		;GET TOKEN
+        SUB #.LIST,R2		;REMOVE OFFSET FOR TABLE
+        ASL R2			;MULT BY 2
+        CMP R2,#TBL4ND-TABLE4	;TOKEN TOO LARGE TO BE IMMED?
+        BHI IMSTMT		;
+        ADD #2,R2
+        ADD PC,R2
+        ADD(R2),PC		;JUMP TO ROUTINE
+;
+TABLE4: .WORD LIST-TABLE4
+        .WORD RUN-TABLE4
+        .WORD SAVE-TABLE4
+        .WORD OLD-TABLE4
+        .WORD SCRACH-TABLE4
+TBL4ND: .WORD CLEAR-TABLE4
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;EXECUTE IMMEDIATE MODE STATEMENT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+IMSTMT: ADD R1,R0		;POINT TO END OF STATEMENT
+        CMP R0,CODE(R5)		;ENOUGH ROOM FOR EOF?
+        BCS .+6
+        JMP ERRTRN
+        MOVB #.EOF,(R0)		;ADD EOF TO LINE
+        MOV #.SCALR,LINENO(R5)	;SET TO INVALID LINE NUM
+        CLR CLMNTT(R5)		;CLEAR COLUMN COUNTERS
+        CLR CLMNPP
+        CLR CLMNLP
+        JMP EXECUT		;EXECUTE LINE
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;COMMAND: OLD
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+OLD:    MOV PDL(R5),SP		;INIT STACK
+        JSR PC,INITSC		;SCRATCH PROGRAM
+        JSR PC,CLRVAR		;CLEAR VARIABLES
+        JSR PC,SCANPN		;SCAN PAST '#'
+        JSR PC,CKISET		;SET I/O DEVICE
+        CMPB(R1)+,#.EOL		;NEXT TOKEN MUST BE EOL
+        BEQ OLD001
+        JMP ERRSX5		;ELSE IT IS ERROR
+OLD001: JMP EDIT		;READ IN PROGRAM
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;COMMAND: SAVE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SAVE:   JSR PC,SCANPN		;SCAN PAST '#'
+        JSR PC,CKOSET		;SET OUTPUT DEVICE
+        CMPB R2,#2		;IS IT LINE PRINTER?
+        BLE LISTSV		;THEN DO NORMAL 'LIST'
+        JSR R1,MSGODE		;SEND FORM FEEDS
+        .BYTE 14,14,0
+        .EVEN
+LISTSV: JSR PC,LSTPRO		;LIST PROGRAM
+        JMP READY
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;COMMAND: LIST
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LIST:   INC R1			;POINT TO NEXT TOKEN
+        JSR PC,FLINE		;SEARCH FOR LINE NUMBER
+        BCS LISTSV		;NO NUMB THEN NORMAL LIST
+        MOV(R2),R1		;POINT TO LINE
+        BEQ LISTSV		;IF UNDEF DO NORMAL LIST
+        JSR PC,LSTLOO		;LIST PARTIAL PROGRAM
+        JMP READY
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;COMMAND: RUN
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RUN:    JSR PC,CLRVAR		;CLEAR VARIABLES
+        MOV CODE(R5),R1		;POINT TO USER PROGRAM
+DIMLOP: MOVB(R1)+,R2		;GET TOKEN
+        BMI DIMNON
+        SWAB R2
+        BISB(R1)+,R2
+        ADD(R5),R2
+        MOV(R2),LINENO(R5)
+        MOVB(R1)+,R2		;GET TOKEN
+DIMNON: CMPB R2,#.DIM
+        BEQ DIMGOT		;IS IT 'DIM'
+        CMPB R2,#.DEF
+        BEQ DEFGOT		;IS IT 'DEF'
+        CMPB R2,#.RAND
+        BEQ RNDGOT		;IS IT 'RAND'
+        CMPB R2,#.EOF
+        BEQ DIMDON		;IS IT ;EOF'
+        DEC R1
+DEFDUN: JSR PC,SKIPEL		;ADVANCE TO END OF LINE
+        BR DIMLOP
+;
+;GOT 'DIM' TOKEN
+DIMGOT: MOVB(R1)+,R2
+        BMI ERRDIM
+        SWAB R2
+        BISB(R1)+,R2
+        ADD(R5),R2
+        CMPB(R1)+,#.LPRN
+        BNE ERRDIM
+        CLR R3
+        CMPB(R1),#.ILIT1
+        BEQ ALLOC1
+        CMPB(R1)+,#.ILIT2
+        BNE ERRDIM
+        MOVB(R1),R3
+        BMI ERRDIM
+        SWAB R3
+ALLOC1: INC R1
+        BISB(R1)+,R3
+        MOV #177777,R4
+        CMPB(R1)+,#.RPRN
+        BEQ DOALLC
+        CMPB -(R1),#.COMA
+        BNE ERRDIM
+        INC R1
+        CLR R4
+        CMPB(R1),#.ILIT1
+        BEQ ALLOC2
+        CMPB(R1)+,#.ILIT2
+        BNE ERRDIM
+        MOVB(R1),R4
+        BMI ERRDIM
+        SWAB R4
+ALLOC2: INC R1
+        BISB(R1)+,R4
+        CMPB(R1)+,#.RPRN
+        BNE ERRDIM
+DOALLC: CMP(R2),#.NVAR
+        BEQ ERRDIM
+        BLT DIMSCL
+        TST 4(R2)
+        BPL ERRDIM
+DIMSCL: JSR PC,ALLOC
+        CMPB(R1)+,#.COMA
+        BEQ DIMGOT
+        CMPB -(R1),#.EOL
+        BNE ERRDIM
+        INC R1
+        BR DIMLOP
+;
+;GOT 'RAND' TOKEN
+RNDGOT: MOV RNDCT(R5),RND1(R5)
+        BISB #1,RND1(R5)
+        CMPB(R1)+,#.EOL
+        BEQ DIMLOP
+        JMP ERRSX5
+;
+ERRDIM: IOT
+	.IFNDF $LONGER
+        .ASCII 'IDM'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'ILLEGAL DIM'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+ERRDEF: IOT
+	.IFNDF $LONGER
+        .ASCII 'IDF'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'ILLEGAL DEF'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+;GOT 'DEF' TOKEN
+DEFGOT: CMPB(R1)+,#.FN		;NEXT TOKEN MUST BE 'FN'
+        BNE ERRDEF
+        MOVB(R1)+,R2		;GET FUNCTION NAME
+        ADD PDL(R5),R2		;MAKE POINTER TO FUNCTION ENTRY
+        TST(R2)			;ALREADY DEFINED?
+        BNE ERRDEF
+        CMPB(R1)+,#.LPRN	;NEXT TOKEN MUST BE '('
+        BNE ERRDEF
+        MOV R1,(R2)		;SAVE POINTER IN FUNCTION DEF
+        BR DEFDUN
+;
+;GOT 'EOF' TOKEN
+DIMDON: CLR CLMNTT(R5)		;CLEAR COLUMN COUNTERS
+        CLR CLMNPP		;CLEAR PUNCH COLUMN
+        CLR CLMNLP		;CLEAR PRINTER COLUMN
+        MOV PDSIZE(R5),R4
+        MOV CODE(R5),R1		;POINT TO START OF USER CODE
+        CMPB(R1),#.EOF		;END OF PROGRAM?
+        BNE EXECUT		;NO, THEN RUN IT
+;
+ERRRUN: JSR R1,MSGERR
+;
+	.IFNDF $LONGER
+        .ASCII 'NPR'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'NO PROGRAM'
+	.ENDC
+	.BYTE 0
+	.EVEN
+;
+        JMP READY2
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;EXECUTE NEXT LINE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+IGNORE: JSR PC,SKIPEL		;SKIP TO END OF LINE
+EXECUT: TSTB CNCFLG(R5)		;TEST ^C FLAG
+        BEQ NOCNC
+        CLRB CNCFLG(R5)		;CLEAR ^C FLAG
+        JMP READY
+;
+NOCNC:  MOVB(R1)+,R2		;GET NEXT TOKEN
+        BGE NOTSYM		;BR IF POINTER
+        BIC #-200,R2		;REMOVE TOKEN BIAS
+        ASL R2			;MULT BY 2 (FORM OFFSET)
+        CMP R2,#TBL1EN-TABLE1+2	;TOO LARGE?
+        BHI ERSX1
+        ADD PC,R2		;JUMP TO STATEMENT
+        ADD(R2),PC
+;
+TABLE1: .WORD EXECUT-TABLE1	;EOL
+        .WORD END-TABLE1	;END
+        .WORD FOR-TABLE1	;FOR
+        .WORD GOTO-TABLE1	;GOSUB
+        .WORD GOTO-TABLE1	;GOTO
+        .WORD ON-TABLE1         ;ON
+        .WORD IF-TABLE1		;IF
+        .WORD INPUT-TABLE1	;INPUT
+        .WORD LET-TABLE1	;LET
+        .WORD NEXT-TABLE1	;NEXT
+        .WORD PRINT-TABLE1	;PRINT
+        .WORD RETURN-TABLE1	;RETURN
+        .WORD STOP-TABLE1	;STOP
+        .WORD IGNORE-TABLE1	;DIM
+        .WORD IGNORE-TABLE1	;RANDOM
+        .WORD RESTOR-TABLE1	;RESTORE
+        .WORD IGNORE-TABLE1	;REM
+        .WORD IGNORE-TABLE1	;DEF
+        .WORD READ-TABLE1	;READ
+        .WORD IGNORE-TABLE1	;DATA
+        .WORD CALL-TABLE1	;CALL
+        .WORD POKE-TABLE1	;POKE
+TBL1EN: .WORD EOF-TABLE1	;END OF FILE
+;
+NOTSYM: SWAB R2
+        BISB(R1)+,R2
+        ADD(R5),R2
+        CMP(R2),#.SCALR
+        BCC ASSIGN
+        MOV(R2),LINENO(R5)
+        BR EXECUT
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: CALL
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+CALL:
+	.IFNDF $NOSTR
+	JSR PC,EVAL		;EVALUATE EXPRESSION
+        BCC ERSX1		;MUST BE STRING
+        MOV(SP)+,R0
+        CMP R0,#177777		;NULL STRING?
+        BEQ ERFN1
+        MOVB(R0)+,R3		;LENGTH OF STRING
+        MOVB(R0)+,(R0)+
+	.ENDC
+;
+	.IFDF $NOSTR
+	MOVB (R1)+,R2
+	CMPB R2,#.SQUOT
+	BEQ CALL1
+	CMPB R2,#.DQUOT
+	BNE ERSX1
+CALL1:	CMPB (R1)+,#.TEXT
+	BNE ERSX1
+	MOV R1,R0
+	CLR R3
+CALLP:	INC R3
+	TSTB (R1)+
+	BNE CALLP
+	CMPB (R1)+,R2
+	BNE ERSX1
+	DEC R3
+	BEQ ERFN1
+	.ENDC
+;
+        MOV @#46,R2		;GET ADDRESS OF USER TABLE
+        BEQ ERFN1		;CAN'T CALL IF NO TABLE
+        MOV R2,-(SP)
+CALLCK: TSTB(R2)		;END OF TABLE?
+        BEQ ERFN1
+        MOV R0,-(SP)		;GET POINTER TO STRING
+        MOV R3,-(SP)		;GET STRING LENGTH
+;
+CALLM1: CMPB(R0)+,(R2)+		;COMPARE TABLE AND STRING
+        BNE CALLNM
+        DEC R3			;DEC BYTE COUNTER
+        BNE CALLM1		;LOOP TO TEST NEXT CHAR
+;
+;GOT TABLE ENTRY MATCH - CHECK LENGTH
+        SUB(SP),R3
+        ADD #4,R3
+        BLT ERFN1
+        BEQ CALLX
+CALLM2: TSTB(R2)+
+        BNE CALLNM		;TABLE ENTRY LONGER? NO MATCH
+        DEC R3
+        BNE CALLM2		;LOOP THROUGH ENTIRE ENTRY
+;
+;GOT MATCH - CALL ROUTINE
+CALLX:  ADD #6,SP		;CLEAN UP STACK
+        MOV(R2),R2		;GET ROUTINE ADDRESS
+        BEQ ERFN1		;CAN'T BE ZERO
+        MOV R1,-(SP)		;SAVE REGS
+        MOV R4,-(SP)
+        MOV R5,-(SP)
+        JSR PC,(R2)		;CALL ROUTINE
+        MOV(SP)+,R5		;RESTORE REGS
+        MOV(SP)+,R4
+        MOV(SP)+,R1
+        JMP IGNORE		;
+;
+ERFN1:  JMP ERRUFN
+ERSX1:  JMP ERRSX5
+;
+;TABLE ENTRY DIDN'T MATCH
+CALLNM: MOV(SP)+,R3		;ADVANCE TO NEXT ENTRY
+        MOV(SP)+,R0
+        ADD #6,(SP)
+        MOV(SP),R2
+        BR CALLCK
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: LET
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LET:    MOVB(R1)+,R2		;GET VAR NAME
+        BMI ERSX1		;SHOULDNT BE A TOKEN HERE
+        SWAB R2
+        BISB(R1)+,R2		;GET REST OF VAR NAME
+        ADD(R5),R2
+ASSIGN: JSR PC,GETVAR		;GET POINTER TO VARIABLE
+        CMPB(R1)+,#.EQ		;NEXT TOKEN EQ?
+        BNE ERSX1
+        JSR PC,EVAL		;EVALUATE EXPRESSION
+;
+	.IFNDF $NOSTR
+        BCS ASSSTR		;STRING?
+	.ENDC
+;
+        CMPB(R1)+,#.EOL		;NEXT MUST BE EOL
+        BNE ERSX1
+        JSR PC,STOVAR		;STORE VALUE IN VARIABLE
+        JMP EXECUT
+;
+	.IFNDF $NOSTR
+ASSSTR: CMPB(R1)+,#.EOL		;NEXT MUST BE EOL
+        BNE ERSX1
+        JSR PC,STOSVA		;STORE STRING VARIABLE
+        JMP EXECUT
+	.ENDC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: END
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+EOF: 
+END:    CMP R1,CODE(R5)		;EXECUTING FROM USER PROGRAM?
+        BCC JMPRDY		;THEN PRINT READY MESSAGE
+        JSR R1,MSG		;IF IMMED JUST PRINT NEWLINE
+        .BYTE 15,12,0
+        .EVEN
+        JMP EDIT
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: STOP
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+STOP:   JSR R1,MSG		;PRINT MESSAGE
+        .BYTE 15,12
+        .ASCII 'STOP'
+        .BYTE 0
+        .EVEN
+;
+JMPRDY: JMP READY		;GO TO READY
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: IF
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+IF:     JSR PC,EVAL		;EVALUATE 1ST EXPRESSION
+        BCC IFNUMB		;NUMERIC?
+        CMPB(R1),#.LE		;VALID RELATIONAL OPERATOR?
+        BCS ERSX1
+        CMPB(R1),#.EQ		;LAST RELOP
+        BHI ERSX1
+        CMP SP,R4
+        BCS ERRPD3
+        MOVB(R1)+,-(SP)		;SAVE RELOP
+        JSR PC,EVAL		;EVALUATE 2ND EXPRESSION
+        .IFNDF $NOSTR
+	BCC ERRMX4		;NUMERIC IS ERROR (MIXED)
+	.ENDC
+;
+;COMPARE 
+        MOV(SP)+,R3		;POINT TO STRING 1
+        MOV(SP)+,R0		;GET RELOP
+        MOV(SP)+,R2		;POINT TO STRING 2
+        MOV R0,-(SP)		;SAVE RELOP
+        CLR -(SP)		;CLEAR LENGTH
+        CMP R2,#177777		;STRING 2 EMPTY?
+        BEQ .+4
+        BISB(R2),(SP)
+        CLR R0
+        CMP R3,#177777		;STRING 1 EMPTY?
+        BEQ .+4
+        BISB(R3),R0
+        ADD #3,R2		;SKIP PAST STRING HEADER
+        ADD #3,R3
+        BR .+6
+IFLOOP: CMPB(R3)+,(R2)+		;COMPARE CHARACTER
+        BNE IFCOMP		;NOT MATCH,THEN WE ARE DONE
+        DEC R0
+        BLT IFLEND
+        DEC(SP)			;DEC LENGTH COUNT
+        BGE IFLOOP		;NOT ZERO THEN LOOP
+        CMPB(R3)+,#SPACE	;IS REST OF STRING SPACES?
+        BNE IFCOMP
+        DEC R0
+        BGE .-10
+        BR IFSEQ		;STRINGS ARE EQUAL
+;
+IFLEND: TST(SP)			;COUNT EQ ZERO
+        BLE IFSEQ		;THEN STRINGS ARE EQUAL
+        CMPB #SPACE,(R2)+	;REST OF STRING SPACES?
+        BNE IFCOMP
+        DEC(SP)
+        BGT .-10
+;
+;STRING RESULT EQUAL
+IFSEQ:  TST(SP)+		;CLEAN UP STACK
+        MOV(SP)+,R0		;RECOVER RELOP
+;
+;RESULT EQUAL
+IFLEQR: MOVB(R1)+,R2		;GET NEXT TOKEN
+        CMPB R2,#.THEN		;IS IT 'THEN' CHECK COMPARISON
+        BEQ .+10
+        CMPB R2,#.GOTO		;MUST BE 'GOTO' OR ERROR
+        BNE ERRSX7
+        CMPB R0,#.LE		;COMPARE LESS OR EQUAL
+        BEQ GOTO
+        CMPB R0,#.GE		;COMPARE GREATER OR EQUAL
+        BEQ GOTO
+        CMPB R0,#.EQ		;COMPARE EQUAL
+        BEQ GOTO
+        JMP IGNORE
+;
+ERRSX7: JMP ERRSX5
+;
+;STRINGS NOT EQUAL
+IFCOMP: BLT IFSGT		;IS STRING GREATER?
+        TST(SP)+		;CLEAN UP STACK
+        MOV(SP)+,R0		;GET RELOP
+        BR IFLLTR		;GOTO RESULT LESS THAN
+;
+;NUMERIC COMPARE
+IFNUMB: CMPB(R1),#.LE		;VALID RELOP?
+        BCS ERRSX7
+        CMPB(R1),#.EQ		;LAST RELOP
+        BHI ERRSX7
+        CMP SP,R4
+        BCS ERRPD3
+        MOV FAC2(R5),-(SP)	;SAVE FAC
+        MOV FAC1(R5),-(SP)
+        MOVB(R1)+,-(SP)		;SAVE RELOP
+        JSR PC,EVAL		;EVALUATE 2ND EXPRESSION
+;
+	.IFNDF $NOSTR
+        BCS ERRMX4		;ERROR IF STRING
+	.ENDC
+;
+        MOV(SP)+,R0
+        JSR PC,SUBSTK		;SUBTRACT
+        BEQ IFLEQR		;RESULT EQUAL?
+        BLT IFLGTR		;RESULT GREATER?
+;
+;RESULT LESS THAN
+IFLLTR: MOVB(R1)+,R2		;BRANCH BASED ON NEXT TOKEN
+        CMPB R2,#.THEN		;IS IT 'THEN' CHECK COMPARISON
+        BEQ .+10
+        CMPB R2,#.GOTO		;MUST BE 'GOTO' OR ERROR
+        BNE ERRSX6
+        CMPB R0,#.LE		;COMPARE LESS OR EQUAL
+        BEQ GOTO
+        CMPB R0,#.LT		;COMPARE LESS THAN
+        BEQ GOTO
+        CMPB R0,#.NE		;COMPARE NOT EQUAL
+        BEQ GOTO
+        JMP IGNORE		;THEN DO NEXT LINE
+;
+ERRPD3: JMP ERRPDL
+	.IFNDF $NOSTR
+ERRMX4: JMP ERRMIX
+	.ENDC
+;
+;STRING RESULT GREATER
+IFSGT:  TST(SP)+		;CLEAN UP STACK
+        MOV(SP)+,R0		;GET RELOP
+;
+;RESULT GREATER
+IFLGTR: MOVB(R1)+,R2		;BRANCH BASED ON NEXT TOKEN
+        CMPB R2,#.THEN		;IS IT 'THEN' CHECK COMPARISON
+        BEQ .+10
+        CMPB R2,#.GOTO		;MUST BE 'GOTO' OR ERROR
+        BNE ERRSX7
+        CMPB R0,#.GE		;COMPARE GREATER OR EQUAL
+        BEQ GOTO
+        CMPB R0,#.GT		;COMPARE GREATER
+        BEQ GOTO
+        CMPB R0,#.NE		;COMPARE NOT EQUAL
+        BEQ GOTO
+        JMP IGNORE
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: RESTORE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RESTOR: MOV #177777,@PDL(R5)	;MAKE DATA POINTER INVALID
+        JMP EXECUT
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: GOSUB
+;STATEMENT: GOTO
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+GOSUB: 
+GOTO:   JSR PC,FLINE		;FIND TARGET LINE
+        BCS ERRSX6		;NONEXISTANT?
+        CMPB(R1)+,#.EOL		;NEXT TOKEN MUST BE 'EOL'
+        BNE ERRSX6
+        TST(R2)
+        BEQ ERRGO
+        CMPB 177774(R1),#.GOSUB	;WE DOING A GOSUB?
+        BNE GONOSA		;THEN DO GOTO
+GOSUB1: MOV GSBCTR(R5),R3	;GET GOSUB NEST COUNTER
+        ASL R3
+        ADD PDL(R5),R3		;ADD TO BASE
+        CMP R3,LIMIT(R5)	;OUT OF SPACE?
+        BHI ERRDEE
+        SUB #3,R1		;jcl BACKUP A BIT
+        MOV R1,(R3)		;SAVE RETURN ADDRESS
+        INC GSBCTR(R5)		;BUMP NEST COUNT
+GONOSA: MOV(R2),R1		;MAKE TARGET NEXT TO RUN
+        JMP EXECUT		;AND RUN IT
+;
+ERRDEE: IOT
+	.IFNDF $LONGER
+        .ASCII 'GND'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'GOSUB NESTED TOO DEEP'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+ERRGO:  IOT
+	.IFNDF $LONGER
+        .ASCII 'ULN'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'UNDEFINED LINE NUMBER'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+ERRSX6: JMP ERRSX5
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: ON (jcl 03/20/16)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ON:     JSR PC,ARGB		;GET INDEX VALUE
+        MOV FAC2(R5),R3
+        BLE ONERR		;0 OR MINUS?
+        MOV R1,-(SP)		;SAVE POSITION
+        INC R1
+ONLINE: JSR PC,FLINE            ;FIND LINE
+        BCS ONSYN		;LINE NOT FOUND
+        DEC R3			;DEC INDEX
+        BEQ ONKYWD		;GOT MATCH
+        CMPB (R1)+,#.COMA	;ANOTHER LINE?
+        BEQ ONLINE
+        CMPB -(R1),#.EOL	;END OF LINE
+        BEQ ONERR		;OUT OF RANGE
+        BR ONSYN		;SYNTAX ERROR
+ONKYWD: TST (R2)		;UNDEF LINE NUM?
+        BEQ ERRGO
+        MOVB @(SP)+,R3		;GET TOKEN
+        CMPB R3,#.GOSUB		;IS IT GOSUB?
+        BEQ GOSUB1
+        CMPB R3,#.GOTO		;IS IT GOTO?
+        BEQ GONOSA
+        CMPB R3,#.THEN		;IS IT THEN?
+        BEQ GONOSA
+;
+ONSYN:  JMP ERRSX5
+;
+ONERR:  IOT
+        .IFNDF $LONGER
+        .ASCII \OOR\
+        .ENDC
+        .IFDF $LONGER
+        .ASCII \ON OUT OF RANGE\
+        .ENDC
+        .BYTE 0
+        .EVEN
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: RETURN
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RETURN: CMPB(R1)+,#.EOL		;'EOL' MUST BE NEXT
+        BNE ERRSX6
+        MOV GSBCTR(R5),R3	;GET GOSUB NEST COUNTER
+        CMP R3,#33		;GOSUB STACK EMPTY?
+        BEQ ERRRET
+        DEC R3			;DEC NEST COUNT
+        MOV R3,GSBCTR(R5)
+        ASL R3
+        ADD PDL(R5),R3		;POINT TO RETURN ADDRESS
+        TST(R3)
+        BEQ ERRRET		;NO RETURN ADDRESS?
+        MOV(R3),R1		;MAKE IT CURRENT LINE
+        JMP IGNORE		;jcl SKIP TO EOL AND EXECUTE IT
+;
+	.IFNDF $NOSTR
+ERRMX5: JMP ERRMIX
+	.ENDC
+;
+ERRRET: IOT
+	.IFNDF $LONGER
+        .ASCII 'RBG'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'RETURN BEFORE GOSUB'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: FOR
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+FOR:    MOV R1,-(SP)
+        DEC(SP)
+        MOVB(R1)+,R2		;GET VAR NAME
+        BMI ERRSX6		;CANT BE TOKEN
+        SWAB R2
+        BISB(R1)+,R2		;GET REST OF NAME
+        ADD(R5),R2
+        CMP(R2),#.SVAR		;STRING?
+        BEQ ERRSX6
+        CMPB(R1)+,#.EQ		;CHECK FOR '='
+        BNE ERRSX6
+        MOV R2,VARSAV(R5)	;SAVE VAR POINTER
+        JSR PC,EVAL		;EVAL START VALUE
+;
+	.IFNDF $NOSTR
+        BCS ERRMX5
+	.ENDC
+;
+        MOV #177777,SS1SAV(R5)
+        JSR PC,STOVAR		;SET START VALUE
+        CMPB(R1)+,#.TO		;CHECK FOR 'TO'
+        BNE ERRSX6
+        JSR PC,EVAL		;EVAL END VALUE
+;
+	.IFNDF $NOSTR
+        BCS ERRMX5
+	.ENDC
+;
+        MOV FAC1(R5),SS1SAV(R5)	;SAVE END VALUE
+        MOV FAC2(R5),SS2SAV(R5)
+        CLR FAC1(R5)
+        MOV #1,FAC2(R5)		;DEFAULT STEP
+        CMPB(R1),#.EOL		;END OF LINE?
+        BEQ FORONE		;THEN STEP IS 1
+        CMPB(R1)+,#.STEP	;SHECK FOR 'STEP'
+        BNE ERRSX6
+        JSR PC,EVAL		;EVAL STEP VALUE
+;
+	.IFNDF $NOSTR
+        BCS ERRMX5
+	.ENDC
+;
+        CMPB(R1),#.EOL		;END OF LINE?
+        BNE ERRSX6		;ERROR IF NOT
+FORONE: INC R1			;POINT TO NEXT TOKEN
+        MOV LINENO(R5),R3	;GET LINE NUMBER
+        BR FORLOK
+;
+FORSKP: JSR PC,SKIPEL		;SKIP TO END OF LINE
+FORLOK: MOVB(R1),R2
+        BMI FORNOL
+        INC R1
+        SWAB R2
+        BISB(R1)+,R2
+        ADD(R5),R2
+        CMP(R2),#.SCALR
+        BCC FORNOL
+        MOV(R2),R3
+FORNOL: CMPB(R1),#.EOF		;END OF SOURCE?
+        BEQ ERR4WO		;THEN FWN ERROR
+        CMPB(R1),#.NEXT		;FOUND NEXT?
+        BEQ FORNEX
+        CMPB(R1),#.FOR		;NESTED FOR?
+        BNE FORSKP		;LOOP FOR MORE
+        INC R1
+        MOVB(R1),R2
+        BMI FORSKP
+        INC R1
+        SWAB R2
+        BISB(R1)+,R2
+        ADD(R5),R2
+        CMP R2,VARSAV(R5)
+        BNE FORSKP
+;
+ERR4WO: IOT
+	.IFNDF $LONGER
+        .ASCII 'FWN'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'FOR WITHOUT NEXT'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+FORNEX: ADD #13,R1
+        MOVB(R1),R2
+        BMI FORSKP
+        INC R1
+        SWAB R2
+        BISB(R1)+,R2
+        ADD(R5),R2
+        CMP R2,VARSAV(R5)	;VAR MATCH?
+        BNE FORSKP
+        CMPB(R1),#.EOL		;CHECK FOR END OF LINE
+        BNE ERSX10		;ERROR IF NOT
+        SUB #14,R1
+        MOVB 1(SP),(R1)+
+        MOVB(SP),(R1)+
+        MOVB SS1SAV+1(R5),(R1)+
+        MOVB SS1SAV(R5),(R1)+
+        MOVB SS2SAV+1(R5),(R1)+
+        MOVB SS2SAV(R5),(R1)+
+        MOVB FAC1+1(R5),(R1)+
+        MOVB FAC1(R5),(R1)+
+        MOVB FAC2+1(R5),(R1)+
+        MOVB FAC2(R5),(R1)+
+        MOV R3,(SP)
+        MOV FAC1(R5),-(SP)
+        BNE .+6
+        MOV FAC2(R5),(SP)
+        MOV SS2SAV(R5),-(SP)
+        MOV SS1SAV(R5),-(SP)
+        JSR PC,EVAL
+        JSR PC,SUBSTK
+        BEQ FORGOG
+        BMI FORLTL
+FORGTL: TST(SP)+
+        BMI FORGO
+        BR FORZER
+;
+ERSX10: JMP ERRSX5
+;
+FORLTL: TST(SP)+
+        BPL FORGO
+FORZER: MOV(SP)+,LINENO(R5)
+        CLRB -14(R1)
+        CLRB -13(R1)
+        INC R1
+        JMP EXECUT
+;
+FORGOG: TST(SP)+
+FORGO:  TST(SP)+
+        MOVB -13(R1),-(SP)
+        MOVB -14(R1),1(SP)
+        MOV(SP)+,R1
+        JMP IGNORE
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: NEXT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+NEXT:   CLR R2
+        BISB(R1)+,R2
+        SWAB R2
+        BISB(R1)+,R2
+        CMP R2,LOFREE(R5)
+        BCC ERRNEX
+        CMPB(R2)+,#.FOR
+        BNE ERRNEX
+        ADD #10,R1
+        MOVB(R1)+,R3
+        BMI ERRSX2
+        SWAB R3
+        BISB(R1),R3
+        ADD(R5),R3
+        DEC R1
+        CMPB(R1)+,(R2)+
+        BNE ERRNEX
+        CMPB(R1),(R2)+
+        BNE ERRNEX
+        CMPB(R2),#.EQ
+        BNE ERRNEX
+        MOV R3,VARSAV(R5)	;SAVE VAR ADDRESS
+        CMP(R3),#.SVAR
+        BEQ ERRSX2
+        CMP(R3)+,#.SCALR
+        BEQ .+4
+        MOV(R3),R3
+        MOV(R3)+,FAC1(R5)	;PUT FOR VAR VALUE IN FAC
+        MOV(R3),FAC2(R5)
+        DEC R1
+        MOVB -(R1),-(SP)	;PUT STEP ON STACK
+        MOVB -(R1),1(SP)
+        MOVB -(R1),-(SP)
+        MOVB -(R1),1(SP)
+        MOV(SP),SS2SAV(R5)	;SAVE STEP SIGN
+        BNE .+10
+        MOV 2(SP),SS2SAV(R5)
+        JSR PC,ADDSTK		;ADD STEP VALUE
+        MOV FAC2(R5),-(SP)
+        MOV FAC1(R5),-(SP)
+        MOVB -(R1),-(SP)
+        MOVB -(R1),1(SP)
+        MOVB -(R1),-(SP)
+        MOVB -(R1),1(SP)
+        JSR PC,SUBSTK		;SUB END VALUE
+        BEQ NEXGO
+        BMI NEXLTL
+NEXGTL: TST SS2SAV(R5)		;TEST STEP SIGN
+        BMI NEXGO
+        BR NEXEND
+;
+NEXLTL: TST SS2SAV(R5)
+        BPL NEXGO
+;
+;FOR/NEXT DONE
+NEXEND: CLRB -(R1)
+        CLRB -(R1)
+        ADD #15,R1		;ADVANCE TO NEXT LINE
+        CMP(SP)+,(SP)+
+        JMP EXECUT		;CONTINUE
+;
+;ANOTHER LOOP
+NEXGO:  MOVB -(R1),-(SP)
+        MOVB -(R1),1(SP)
+        MOV(SP)+,R1		;GET TARGET LINE
+        MOV(SP)+,FAC1(R5)
+        MOV(SP)+,FAC2(R5)
+        MOV #177777,SS1SAV(R5)
+        JSR PC,STOVAR		;STORE NEW INDEX
+        JMP IGNORE		;
+;
+ERRNEX: IOT
+	.IFNDF $LONGER
+        .ASCII 'NBF'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'NEXT BEFORE FOR'
+	.ENDC
+        .BYTE 0
+        .EVEN
+
+ERRSX2: JMP ERRSX5
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: PRINT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PRINT:  CMPB(R1),#.PND		;DEVICE SPECIFIED?
+        BNE PRNT01
+        INC R1			;SKIP PAST '#'
+        JSR PC,CKOSET		;SET UP I/O DEVICE
+        TST R2			;USING TTY?
+        BEQ COLOHC		;THEN SKIP SETTING COLUMN
+        MOV TABL5(R2),COLUMN(R5);SET CURRENT COLUMN
+;
+COLOHC: CMPB(R1),#.EOL		;IF BLANK PRINT SKIP ':'
+        BEQ PRNT01
+        CMPB(R1)+,#.COLN	;COLON SEPERATOR?
+        BNE ERRSX2		;THEN SYNTAX ERROR
+;
+;MAIN PRINT LOOP
+PRNT01: CMPB(R1),#.COMA		;CHECK SEPERATOR	
+        BEQ PRISP		;THEN PRINT SPACE
+        CMPB(R1),#.SEMI		;SEMICOLON?
+        BEQ PRIBOT 
+        CMPB(R1),#.EOL		;END OF LINE?
+        BEQ PRIBOT
+;
+	.IFDF $NOSTR
+	CMPB (R1),#.SQUOT
+	BEQ PRISTR
+	CMPB (R1),#.DQUOT
+	BEQ PRISTR
+	CMPB (R1),#.TAB
+	BEQ PRITB
+	.ENDC
+;
+        JSR PC,EVAL		;EVALUATE EXPRESSION
+;
+	.IFNDF $NOSTR
+	BCS PRISTR		;WAS IT STRING?
+	.ENDC
+;
+;PRINT NUMERIC VALUE
+        CMP @COLUMN(R5),#74	;CHECK CURRENT COLUMN
+        BLOS .+6
+        JSR PC,PRINCR		;WRAP LINE
+        JSR PC,NUMSGN		;PRINT SIGNED NUMBER
+        .WORD PUTCHA		;OUTPUT FUNCTION FOR NUMSGN
+        JSR R1,MSGODE
+        .WORD  SPACE
+        BR PRIBOT
+;
+TABL5=.-2
+        .WORD CLMNPP
+        .WORD CLMNLP
+;
+	.IFNDF $NOSTR
+;PRINT STRING VALUE
+PRISTR: MOV(SP)+,R2		;GET STRING LENGTH
+        INC R2			;WAS IT EMPTY?
+        BEQ PRIBOT
+        CLR R3
+        BISB -(R2),R3
+        ADD #3,R2		;POINT TO STRING DATA
+PRILOO: CMP @COLUMN(R5),#MAXCOL	;CHECK CURRENT COLUMN
+        BCS .+6
+        JSR PC,PRINCR		;THEN WRAP LINE
+        MOVB(R2)+,R0		;GET NEXT CHAR
+        JSR PC,PUTCHA		;PRINT IT
+        DEC R3			;DEC COUNT
+        BGT PRILOO
+        BR PRIBOT
+	.ENDC
+;
+PRISP:  JSR R1,MSGODE
+        .WORD  SPACE
+;
+PRIBOT: CMPB(R1),#.EOL		;CHECK NEXT TOKEN
+        BNE PRIMOR		;MORE TO PRINT?
+        JSR PC,PRINCR		;PRINT CRLF 
+        BR PRIJMP		;AND EXIT
+;
+PRIMOR: CMPB(R1)+,#.COMA	;COMMA SEPERATOR?
+        BNE PRISEM
+;
+;TAB TO NEXT COLUMN
+;PRINT SPACES UNTILL ONE OF THE TAB STOPS IS HIT
+PRICOM: MOV @COLUMN(R5),R0
+        BEQ PRITES		;IF COLUMN=0 EXIT
+        CMP R0,#70
+        BEQ PRITES		;IF COLUMN=70 EXIT
+        BCS .+10		;COLUMN>70 DO CRLF
+        JSR PC,PRINCR
+        BR PRITES		;AND EXIT
+        CMP R0,#52
+        BEQ PRITES		;IF COLUMN=52 EXIT
+        CMP R0,#34
+        BEQ PRITES		;IF COLUMN=34 EXIT
+        CMP R0,#16
+        BEQ PRITES		;IF COLUMN=16 EXIT
+        JSR R1,MSGODE		;PRINT A SPACE
+        .WORD  SPACE
+        BR PRICOM
+;
+PRISEM: CMPB -(R1),#.SEMI	;SEMICOLON SEPERATOR?
+        BNE PRNT01
+        INC R1			;NEXT TOKEN
+PRITES: CMPB(R1),#.EOL		;IS IT EOL
+        BNE PRNT01		;LOOP IF NOT
+;
+PRIJMP: INC R1			;NEXT TOKEN
+        MOV #CLMNTT,COLUMN(R5)	;RESTORE TTY COLUMN 
+        ADD R5,COLUMN(R5)
+        CLRB ODEV(R5)		;RESET I/O DEV TO TTY
+        JMP EXECUT
+;
+	.IFDF $NOSTR
+PRISTR:	MOVB (R1)+,R3
+	CMPB (R1)+,#.TEXT
+PRISJ:	BNE ERRSX2
+PRIST1:	MOVB (R1)+,R2
+	BEQ PRIST1
+	CMPB R2,R3
+	BEQ PRIBOTH
+	CMPB R2,#.EOL
+	BEQ ERRSX2
+	CMP @COLUMN(R5),#110
+	BLO .+6
+	JSR PC,PRINCR
+	MOV R2,R0
+	JSR PC,PUTCHA
+	BR PRIST1
+;
+PRITB:	TSTB (R1)+
+	JSR PC,EVAL
+	JSR PC,INT
+	CMPB (R1)+,#.RPRN
+	BNE PRISJ
+	MOVB FAC2(R5),R2
+	SUB @COLUMN(R5),R2
+PRITB0:	CMP R2,#72.
+	BLO PRITB1
+	SUB #72.,R2
+	BR PRITB0
+PRITB1:	DEC R2
+	BMI PRIBOTH
+	MOV #40,R0
+	JSR PC,PUTCHA
+	BR PRITB1
+	.ENDC
+;
+PRINCR: JSR R1,MSGODE		;PRINT CRLF
+        .BYTE 15,12,0
+        .EVEN
+        CLR @COLUMN(R5)		;RESET COLUMN COUNT
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: INPUT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+INPUT:  CMP R1,CODE(R5)		;IMMEDIATE MODE?
+        BHI INPYES
+        JSR R1,MSGERR		;THEN ERROR
+
+	.IFNDF $LONGER
+        .ASCII 'ILN'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'ILLEGAL NOW'
+	.ENDC
+        .BYTE 0
+        .EVEN
+
+        JMP READY2
+;
+INPYES: CLRB T3(R5)
+        CLRB IDEV(R5)		;RESET INPUT DEVICE
+        CMPB(R1),#.PND		;DEVICE SPECIFIED?
+        BNE INPY01
+        INCB T3(R5)
+        INC R1			;NEXT TOKEN
+        JSR PC,CKISET		;SELECT DEVICE
+        CMPB(R1)+,#.COLN
+        BNE ERRSX8
+;
+INPY01: MOV PC,-(SP)
+INPPC:  ADD #INPEOL-INPPC,(SP)
+INPLOO: MOVB(R1)+,R2		;GET VAR NAME
+        BMI ERRSX8		;CANT BE TOKEN
+        SWAB R2
+        BISB(R1)+,R2		;GET REST OF NAME
+        ADD(R5),R2
+        JSR PC,GETVAR		;LOCATE VARIABLE
+INPRTR: MOV(SP),R3
+        CMPB(R3),#.EOL
+        BNE INPOK
+INPNEW: TSTB T3(R5)		;NEED TO PROMPT?
+        BNE NOQM
+        JSR R1,MSG
+        .ASCII '?'
+        .BYTE 0
+NOQM:   MOV R1,-(SP)
+        JSR PC,LINGET		;GET LINE
+        BCC NOQM1		;GOT GOOD DATA
+        JMP ERRDAT
+;
+NOQM1:  MOV(SP)+,R1
+        MOV VARSAV(R5),R2	;SAVE VAR NAME
+
+	.IFNDF $NOSTR
+        CMP(R2),#.SVAR		;STRING?
+        BEQ INPSTR
+	.ENDC
+;
+;NUMERIC
+        MOV R1,-(SP)
+        MOV R4,-(SP)
+        MOV LINE(R5),R1
+        CMPB(R1)+,#CRET		;FIND END OF INPUT
+        BNE .-4
+        MOV R1,R4
+        INC R4
+        CMP R4,CODE(R5)
+        BHI ERRTR8
+        MOVB -(R1),-(R4)
+        CMP R1,LINE(R5)
+        BHI .-6
+        MOVB #54,(R1)
+        JSR PC,TRAN
+        MOV(SP)+,R4
+        MOV(SP)+,R1
+        MOV LINE(R5),(SP)
+        BR INPRTR
+;
+INPOK:  MOV VARSAV(R5),R2
+;
+	.IFNDF $NOSTR
+        CMP(R2),#.SVAR		;STRING VAR?
+        BEQ INPNEW		;GET INPUT
+	.ENDC
+        INC R3
+        CLR FAC1(R5)
+        CLR FAC2(R5)
+        CMPB(R3),#.COMA
+        BEQ INPSTO
+        JSR PC,LITEVA		;EVALUSTE LITERAL
+        BR INPNGD		;SKIPPED IF GOOD LITERAL
+;
+INPSTO: MOV R3,(SP)
+        JSR PC,STOVAR		;STORE VARIABLE
+        MOV(SP),R3
+        CMPB(R3),#.COMA
+        BEQ INPGOO
+        CMPB(R3),#.EOL
+        BNE INPNGD		;PROMPT FOR GOOD DATA
+INPGOO: CMPB(R1)+,#.COMA
+        BEQ INPLOO
+INPEND: CMPB 177777(R1),#.EOL
+        BNE ERRSX8
+        TST(SP)+
+        TSTB IDEV(R5)		;IF TTY CLEAR COLUMN COUNT
+        BNE GOEXEC
+        CLR CLMNTT(R5)		;CLEAR TERM COLUMN
+GOEXEC: JMP EXECUT		;NEXT LINE
+INPNGD: JSR R1,MSGERR
+
+	.IFNDF $LONGER
+        .ASCII 'BRT'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'BAD DATA RETYPE FROM ERROR'
+	.ENDC
+        .BYTE 15,12
+        .BYTE 0
+        .EVEN
+
+        BR INPNEW
+ERRSX8: JMP ERRSX5
+;
+	.IFNDF $NOSTR
+;INPUT STRING
+INPSTR: MOV LINE(R5),R3		;POINT TO INPUT
+        MOV R3,R2
+        CMPB(R3)+,#CRET		;FIND END OF INPUT
+        BNE .-4
+        MOV R2,-(SP)		;START OF INPUT
+        SUB #3,(SP)
+        MOV R3,-(SP)
+        SUB R2,(SP)
+        DEC(SP)
+        BEQ INPNUL
+        MOV SP,R2
+        ADD #2,R2
+        JSR PC,MAKEST		;MAKE STRIG
+INPNNU: JSR PC,STOSVA		;STORE STRING VARIABLE
+        TST(SP)+		;NEXT TOKEN
+        CMPB(R1)+,#.COMA	;COMMA?
+        BNE INPEND		;THEN DONE
+        TST(SP)+
+        JMP INPY01		;LOOP FOR MORE
+INPNUL: MOV #177777,(SP)
+        BR INPNNU
+	.ENDC
+;
+INPEOL: .WORD .EOL
+ERRTR8: JMP ERRTRN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: READ
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+READ:   MOVB(R1)+,R2		;GET NEXT TOKEN
+        BMI ERRSX8		;SHOULD BE VAR NAME
+        SWAB R2
+        BISB(R1)+,R2
+        ADD(R5),R2
+        JSR PC,GETVAR		;LOCATE VAR
+        MOV @PDL(R5),R3		;GET DATA POINTER
+        BEQ ERRDAT		;THEN OUT OF DATA
+        CMP R3,#177777		;NO DATA YET?
+        BEQ REASCH		;THEN SEARCH
+        CMPB(R3),#.EOL
+        BEQ REAFIN		;THEN FIND NEXT DATA
+        CMPB(R3)+,#.COMA
+        BNE READBA		;THEN BAD DATA
+;
+READGO: MOVB(R3),R2
+	.IFNDF $NOSTR
+        CMPB R2,#.DQUOT		;QUOTED DATA?
+        BEQ READQT
+        CMPB R2,#.SQUOT
+        BEQ READQT
+	.ENDC
+;
+        JSR PC,LITEVA		;GET LITERAL VALUE
+        BR READBA		;SKIPPED IF GOOD LITERAL
+        MOV R3,-(SP)
+        JSR PC,STOVAR		;STORE VALUE
+READDU: MOV(SP)+,R3
+        CMPB(R3),#.EOL
+        BEQ .+10
+        CMPB(R3),#.COMA		;MORE?
+        BNE READBA
+        MOV R3,@PDL(R5)
+        CMPB(R1)+,#.COMA
+        BEQ READ		;LOOP FOR NEXT VAR
+        CMPB 177777(R1),#.EOL	;END OF LIST?
+        BNE ERRSX8
+        JMP EXECUT
+;
+READOU: CLR @PDL(R5)
+ERRDAT: IOT
+	.IFNDF $LONGER
+        .ASCII 'OOD'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'OUT OF DATA'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+READBA: CLR @PDL(R5)
+        IOT
+	.IFNDF $LONGER
+        .ASCII 'BDR'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'BAD DATA READ'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+;SEARCH FOR (NEXT) DATA
+REASCH: MOV CODE(R5),R3		;START OF PROGRAM
+REAFIN: TSTB(R3)		;TEST SOURCE
+        BMI .+6
+        ADD #2,R3
+        CMPB(R3)+,#.DATA	;IS IT DATA?
+        BEQ READGO		;THEN DATA FOUND
+        CMPB -(R3),#.EOF	;END OF FILE?
+        BEQ READOU		;THEN OUT OF DATA
+        MOV R1,-(SP)
+        MOV R3,R1
+        JSR PC,SKIPEL		;SKIP TO END OF LINE
+        MOV R1,R3
+        MOV(SP)+,R1
+        BR REAFIN		;LOOK FOR MORE
+;
+	.IFNDF $NOSTR
+READQT: INC R3
+        CMPB(R3)+,#.TEXT	;SHOULD BE TEXT
+        BNE READBA
+        MOV R3,R0
+        TSTB(R3)+
+        BNE .-2			;LOOK FOR END OF TEXT
+        CMPB(R3)+,R2
+        BNE READBA
+        MOV R3,-(SP)
+        MOV R0,-(SP)
+        SUB #3,(SP)
+        MOV SP,R2
+        MOV R3,-(SP)
+        SUB R0,(SP)
+        SUB #2,(SP)
+        BEQ REANUL		;NULL STRING?
+        JSR PC,MAKEST		;MAKE STRING
+        MOV(SP)+,R3
+        MOV R3,(SP)
+        MOV SP,R0
+        ADD #3,R3
+        MOVB R0,-(R3)
+        SWAB R0
+        MOVB R0,-(R3)
+        BR READST
+;
+REANUL: DEC(SP)			;NULL STRING CLEANUP
+        MOV(SP)+,(SP)
+READST: JSR PC,STOSVA		;STORE STRING VAR
+        BR READDU
+	.ENDC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;STATEMENT: POKE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+POKE:   JSR PC,FLTOFX		;EVALUATE ARGUMENT
+        CMPB(R1)+,#.COMA	;NEXT TOKEN MUST BE COMMA
+        BNE POKXIT
+        MOV FAC2(R5),-(SP)	;SAVE VALUE
+        JSR PC,ARGB		;EVALUATE BYTE ARGUMENT
+        MOV(SP)+,R0		;RECOVER POINTER
+        MOV #4,R2		;SET ERROR TRAP
+        MOV(R2),-(SP)
+        MOV #MEMBAD,(R2)
+        MOVB FAC2(R5),(R0)	;STORE BYTE
+        MOV(SP)+,(R2)
+        JMP EXECUT
+POKXIT: JMP ERRSX5
+;
+;BUS TIME OUT ON POKE
+MEMBAD: CMP(SP)+,(SP)+		;CLEAN UP STACK
+        MOV(SP)+,(R2)
+        IOT			;TRAP TO ERROR ROUTINE
+	.IFNDF $LONGER
+        .ASCII 'NEM'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'NON EXISTANT MEMORY'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;TELETYPE KEYBOARD INTERRUPT HANDLER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+KBINT:  JSR R5,SAVRGI
+        MOV USRARE,R5
+        MOV KBHD(R5),R1
+        MOV #TPS,R4
+        MOVB @#TKB,R0		;GET KEYBOARD CHAR
+        BIC #177600,R0		;MASK OFF
+        BEQ KBIDUN		;SKIP NULLS
+        CMPB R0,#3		;CTRL C?
+        BNE KBXOFF
+        INCB CNCFLG(R5)		;SET FLAG
+        JSR PC,BUFCLR		;DISCARD BUFFER
+        BR DOPUT
+KBXOFF: CMPB R0,#23		;XOFF?
+        BNE KBXON
+        INCB XOFFLG(R5)
+        BIC #100,(R4)		;TURN OFF PRINTER INTERRUPT
+        BR KBIDUN+4
+KBXON:  CMPB R0,#21		;XON?
+        BNE KBCO
+        CLRB XOFFLG(R5)
+        BR KBIDUN
+KBCO:   CMPB R0,#17		;CTRL O
+        BNE DOPUT
+        COMB CNOFLG(R5)		;SET CTRL O FLAG
+        BEQ DOPUT
+        JSR PC,BUFTP
+DOPUT:  JSR PC,PUTBYT
+        BCC KBIDUN
+        TSTB 12(R1)
+        BNE SX0101
+        MOVB R0,12(R1)
+        RTS PC
+SX0101: TSTB(R4)		;LOOP WHILE PRINTER NOT DONE
+        BPL SX0101
+        BIC #100,(R4)		;TURN OFF PRINTER INTERRUPT
+        MOVB #7,@#TPB		;RING BELL
+SX0102: TSTB(R4)		;TEST PRINTER FOR DONE
+        BPL SX0102
+KBIDUN: MOV #100,(R4)		;ENABLE PRINTER INTERRUPT
+        MOV #101,@#TKS		;ENABLE KBD INTERRUPT AND PTR
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;TELETYPE PRINTER INTERRUPT SERVICE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+TPINT:  JSR R5,SAVRGI		;SAVE REGISTERS
+        MOV USRARE,R5
+        TSTB XOFFLG(R5)		;XOFF FLAG SET?
+        BNE OFTYPE
+        TSTB FILLCO(R5)		;FILLING?
+        BEQ TPNXT
+        DECB FILLCO(R5)		;DEC FILL COUNT
+        CLR R0			;CHAR=NULL
+        BR TYPE1
+;
+TPNXT:  MOV #ECHOSP,R4
+        ADD R5,R4
+        TST(R4)
+        BEQ TRYECO
+SPECMS: MOVB @(R4)+,R0
+        BEQ CLRECO
+        INC -(R4)
+TYPE:   CMPB R0,FILLCH(R5)	;CHAR REQUIRE FILL?
+        BNE TYPE1		;JUST SEND IT
+        MOVB FILLNO(R5),FILLCO(R5)
+TYPE1:  MOVB R0,@#TPB		;SEND CHAR
+        RTS PC
+;
+CLRECO: CLR -(R4)
+TRYECO: MOV KBHD(R5),R1
+        JSR PC,GET2BY
+        BCC GOTECO
+MSGSUP: MOV TPHD(R5),R1
+        JSR PC,GET2BY
+        BCC TYPE
+OFTYPE: BIC #100,@#TPS		;TURN OFF INTERUPT
+        RTS PC
+;
+GOTECO: JSR R3,CHKCHR
+        BR PRTDEL		;DELETE
+        BR SCTLFE		;RETURN
+        BR ECHOBA		;RUBOUT/BACKSPACE
+        BR TPCN			;NOT ALPHA
+        BR TYPE			;ALPHA
+;
+TPCN:   CMPB R0,#3		;CTRL C?
+        BNE TPCO
+        MOV #CCMES,(R4)
+        BR SPECMS
+TPCO:   CMPB R0,#17		;CTRL O?
+        BNE TRYECO
+        MOV #COMES,(R4)
+        BR SPECMS
+PRTDEL: MOV #DELMSG,(R4)
+        BR SPECMS
+SCTLFE: MOV #CRLFME,(R4)	;SEND CRLF
+        BR SPECMS
+ECHOBA: MOVB #10,R0		;BELL
+        BR TYPE
+;
+DELMSG: .ASCII ' DELETED'
+;
+CRLFME: .BYTE 15,12,0
+;
+CCMES:  .ASCII '^C'
+        .BYTE 0
+;
+COMES:  .ASCII '^O'
+        .BYTE 15,12,0
+        .EVEN
+;
+	.IFNDF $NOPTP
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PAPER TAPE READER INTERRUPT SERVICE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PTRINT: JSR R5,SAVRGI		;SAVE REGISTERS
+        MOV #PRBFHD,R1		;POINT TO QUEUE
+        MOV USRARE,R5		;POINT TO USER AREA
+        TST @#PRS		;TEST STATUS
+        BMI PREOT		;END OF TAPE
+        MOVB @#PRB,R0		;GET DATA
+        BIC #177600,R0
+        BEQ EXIT02
+        CMPB #177,R0		;RUBOUT?
+        BEQ EXIT02
+        CMPB #12,R0		;LINE FEED
+        BEQ EXIT02		;THEN SKIP
+        JSR PC,PUTBYT		;PUT IN BUFFER
+        BCC EXIT02
+        MOVB R0,12(R1)
+        RTS PC
+EXIT02: MOV #101,@#PRS		;READER RUN
+        RTS PC
+;
+PREOT:  BIS #100000,12(R1)	;EOT ERROR
+        RTS PC
+;
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PAPER TAPE PUNCH INTERRUPT SERVICE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PTPINT: JSR R5,SAVRGI		;SAVE REGS
+        MOV USRARE,R5		;POINT TO USER AREA
+        MOV #PPBFHD,R1		;POINT TO BUFFER
+        TST @#PPS		;TEST STATUS
+        BMI PTPERR		;ERROR?
+        JSR PC,GET1BY		;GET BYTE
+        BCS NOCHR2		;NOTHING TO SEND?
+        MOVB R0,@#PPB		;SEND IT
+        RTS PC			;EXIT
+PTPERR: BIS #1,12(R1)		;SET ERROR BIT
+NOCHR2: CLR @#PPS		;TURN OFF INTERRUPTS
+        RTS PC
+;
+	.ENDC
+;
+	.IFNDF $NOLPT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;LINE PRINTER INTERRUPT SERVICE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LPINT:  JSR R5,SAVRGI		;SAVE REGS
+        MOV USRARE,R5		;POINT TO USER AREA
+        MOV #LPBFHD,R1		;POINT TO BUFFER
+        TST @#LPS		;TEST STATUS
+        BMI LPERR		;ERROR?
+        JSR PC,GET1BY		;GET BYTE
+        BCS LPOFF		;NOTHING TO SEND?
+        MOVB R0,@#LPB		;SEND BYTE
+        RTS PC
+LPERR:  BIS #1,12(R1)		;SET ERROR
+LPOFF:  CLR @#LPS		;TURN OFF INTERRUPT
+        RTS PC
+;
+	.ENDC
+;
+	.IFNDF $NOPOW
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;POWER FAIL INTERRUPT SERVICE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+POWDWN: MOV #POWRUP,@#24	;SET VECTOR FOR POWERUP
+        HALT
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;POWER UP RESTART INTERRUPT SERVICE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+POWRUP: CLR R0
+POWRLP: MOV USRARE,R5		;POINT TO USER AREA
+        MOV #POWDWN,@#24	;SET POWER DOWN VECTOR
+        MOV PDL(R5),SP
+        DEC R0			;KILL TIME
+        BNE POWRLP
+        JMP READY0
+;
+	.ENDC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;CLOSED SUBROUTINES
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: ADDSTK - ADD NUMBER ON STACK TO 
+; FAC1(R5) AND FAC2(R5)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ADDSTK: MOV(SP)+,R3		;RETURN ADDRESS TO R3
+        JSR PC,FIXUP
+        BEQ ADDINT
+        MOV #ERROVF,$ERVEC	;SET ERROR VECTOR
+        JSR R4,FPPSAV		;GO TO POLISH  MODE
+        .WORD PUSH
+        .WORD $ADR
+        .WORD POP
+        .WORD FPPRES		;RETURN FROM POLISH
+        TST FAC1(R5)
+        JMP(R3)			;RETURN
+;
+;ADD INTEGER
+ADDINT: TST(SP)+
+        MOV(SP)+,R2
+        ADD FAC2(R5),R2
+        BVS ADDOVF
+        MOV R2,FAC2(R5)
+        JMP(R3)			;RETURN
+;
+ADDOVF: BMI ADDPOS
+        BEQ ADZERO
+        NEG R2
+        CLRB FAC2(R5)
+        MOVB R2,FAC2+1(R5)
+        SWAB R2
+        MOVB R2,FAC1(R5)
+        CLRB FAC1+1(R5)
+        ADD #143600,FAC1(R5)
+        JMP(R3)			;RETURN
+;
+ADZERO: CLR FAC2(R5)
+        MOV #144200,FAC1(R5)
+        JMP(R3)			;RETURN
+;
+ADDPOS: CLRB FAC2(R5)
+        MOVB R2,FAC2+1(R5)
+        SWAB R2
+        MOVB R2,FAC1(R5)
+        CLRB FAC1+1(R5)
+        ADD #43600,FAC1(R5)
+        JMP(R3)			;RETURN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SOUBROUTINE: ALLOC - ALLOCATE ARRAY SPACE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ALLOC:  MOV R0,-(SP)
+        MOV R1,-(SP)
+        INC R3
+        MOV R4,R1
+        INC R1
+        BEQ .-2
+        CLR R0
+        MOV #20,-(SP)
+ALLOOP: ASL R1
+        BCC ALNOAD
+        ADD R3,R0
+        BCS ERARRY
+ALNOAD: ASL R0
+        BCS ERARRY
+        DEC(SP)
+        BGT ALLOOP
+        TST(SP)+
+        ADD #2,R0
+        BCS ERARRY
+;
+	.IFNDF $NOSTR
+        CMP(R2),#.SVAR
+        BEQ .+6
+	.ENDC
+;
+        ASL R0
+        BCS ERARRY
+        MOV HIFREE(R5),R1
+        SUB R0,R1
+        BCS ERARRY
+        CMP R1,HISTR(R5)
+        BCS ERARRY
+        TST(R1)+
+        BR .+4
+        CLR(R1)+
+        CMP R1,HIFREE(R5)
+        BLOS .-6
+        SUB R0,R1
+;
+	.IFNDF $NOSTR
+        CMP(R2),#.SVAR
+        BEQ ALLSTR
+	.ENDC
+;
+        MOV #.NVAR,(R2)+
+        MOV(R2)+,(R1)+
+        MOV(R2)+,(R1)+
+        MOV R4,(R2)
+        DEC R3
+        MOV R3,-(R2)
+        MOV R1,-(R2)
+        SUB #4,(R2)
+;
+	.IFNDF $NOSTR
+        BR ALEXIT
+;
+ALLSTR: TST(R2)+
+        MOV(R2)+,(R1)+
+        DEC R3
+        MOV R3,(R2)+
+        MOV R4,(R2)
+        MOV R1,177774(R2)
+        SUB #2,177774(R2)
+        MOV #177777,(R1)+
+        CMP R1,HIFREE(R5)
+        BLOS .-10
+        SUB R0,R1
+        MOV(R1),R2
+        INC R2
+        BEQ ALEXIT
+        SWAB R1
+        MOVB R1,(R2)+
+        SWAB R1
+        MOVB R1,(R2)
+	.ENDC
+;
+ALEXIT: SUB R0,HIFREE(R5)
+        MOV(SP)+,R1
+        MOV(SP)+,R0
+        RTS PC
+;
+ERARRY: IOT
+	.IFNDF $LONGER
+        .ASCII 'ATL'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'ARRAYS TOO LARGE'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+	.IFNDF $NOSTR
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: ARGB - EVALUATE BYTE ARGUMENT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ARGB:   JSR PC,EVAL		;EVALUATE EXPRESSION
+        BCS ERRARG		;ERROR?
+        JSR PC,INT		;CONVERT TO FIXED POINT
+        TST FAC1(R5)		;HI WORD NE ZERO?
+        BNE ERRARG
+        TSTB FAC2+1(R5)		;HI BYTE NE ZERO/
+        BNE ERRARG
+        RTS PC			;BYTE ARG LEFT IN FAC
+	.ENDC
+;;
+ERRARG: IOT
+	.IFNDF $LONGER
+        .ASCII 'ARG'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'ARGUMENT ERROR'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: FLTOFX - FLOAT TO FIXED POINT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+FLTOFX: JSR PC,EVAL		;EVALUATE EXPRESSION
+        BCS ERRARG		;CAN'T BE STRING
+        TST FAC1(R5)
+        BMI ERRARG		;CAN'T BE MINUS
+        JSR PC,INT		;CONVERT TO INTEGER
+        TST FAC1(R5)
+        BEQ FL2FX1
+        MOV FAC1(R5),R0
+        BIC #100177,R0
+        CMP R0,#44000
+        BNE ERRARG		;TOO BIG?
+        MOV #10,R0
+FL2FX2: ROR FAC1(R5)
+        ROR FAC2(R5)
+        DEC R0
+        BNE FL2FX2
+        BIS #100000,FAC2(R5)
+FL2FX1: CLR FAC1(R5)		;CLEAR HIGH WORD
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;ERROR HANDLER: BOMB
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+BOMB:   MOV(SP),R1		;GET POINTER TO MESSAGE
+        MOV USRARE,R5		;POINT TO USER AREA
+        MOV PDL(R5),SP		;RESET STACK
+        CLR ODEV(R5)		;RESET I/O DEVICE TO TTY
+        MOV #CLMNTT,COLUMN(R5)	;SET COLUMN COUNTER TO TERM
+        ADD R5,COLUMN(R5)
+        JSR R1,MSG		;PRINT
+        .BYTE 15,12
+        .ASCII '%'
+        .BYTE 0
+;
+;PRINT ERROR MESSAGE
+BOMBNX: MOVB(R1)+,R0		;GET BYTE	
+        BEQ BOMBDN		;END OF STRING?
+        JSR PC,PUTCHA		;PRINT IT
+        BR BOMBNX
+;
+BOMBDN: CMP LINENO(R5),#.SCALR	;IF IMMEDIATE MODE
+        BCC BOMBJM		;DON'T PRINT LINE NUMBER
+        JSR R1,MSG
+        .ASCII ' AT LINE '
+        .BYTE 0
+        .EVEN
+        MOV LINENO(R5),R0	;GET LINE NUMBER
+        BLT BOMBNE		;DOES IT LOOK NEGATIVE?
+        MOV R0,FAC2(R5)		;MOVE TO FAC
+        CLR FAC1(R5)		;CLEAR HI WORD
+        BR BOMBOK		;PRINT IT
+;
+;FIXUP LINE NUMBER THAT WOULD APPEAR NEGATIVE
+BOMBNE: MOVB R0,FAC2+1(R5)
+        CLRB FAC2(R5)
+        SWAB R0
+        MOVB R0,FAC1(R5)
+        CLRB FAC1+1(R5)
+        ADD #43600,FAC1(R5)
+;
+BOMBOK: JSR PC,NUMOUT		;PRINT LINE NUMBER
+        JSR R1,MSG
+        .BYTE 15,12,0
+        .EVEN
+BOMBJM: JMP READY
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: BUFCLR - INIT I/O BUFFERS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+BUFCLR: MOV KBHD(R5),R2
+        MOV(R2)+,R3
+        TST(R2)+
+        MOV R3,(R2)+
+        MOV R3,(R2)+
+        MOV R3,(R2)+
+        JSR PC,BUFTP
+;
+	.IFNDF $NOPTP
+        MOV #PPBFHD,R2
+        JSR PC,INITBF
+        MOV #PRBFHD,R2
+        JSR PC,INITBF
+	.ENDC
+;
+	.IFNDF $NOLPT
+        MOV #LPBFHD,R2
+        JSR PC,INITBF
+	.ENDC
+;
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: BUFTP - INIT TP BUFFER HEADER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+BUFTP:  MOV TPHD(R5),R2
+        MOV(R2)+,R3
+        CMP(R2)+,(R2)+
+        MOV R3,(R2)+
+        MOV R3,(R2)+
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;ROUTINE: CHKCHR - CLASSIFY CHARACTER
+;CALL: JSR R3,CHKCHR
+;RETURNS TO CALL+2  IF CHAR EQ DELETE
+;           CALL+4  IF CHAR EQ CR
+;           CALL+6  IF CHAR EQ RUBOUT OR BS 
+;           CALL+10 IF CHAR NOT ALPHA
+;           CALL+12 EVERYTHING ELSE (ALPHA)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+CHKCHR: CMPB R0,#176	;~
+        BEQ CCEXIT
+        CMPB R0,#175	;}
+        BEQ CCEXIT
+        CMPB R0,#33	;ESC
+        BEQ CCEXIT
+        CMPB R0,#25	;NAK
+        BEQ CCEXIT
+;
+        TST(R3)+	;INCREMENT RETURN ADDRESS
+        CMPB R0,#CRET	;CR
+        BEQ CCEXIT
+;
+        TST(R3)+	;INCREMENT RETURN ADDRESS
+        CMPB R0,#10	;BS
+        BEQ CCEXIT
+        CMPB R0,#177	;RUBOUT
+        BEQ CCEXIT
+        CMPB R0,#137	;_
+        BEQ CCEXIT
+;
+        TST(R3)+	;INCREMENT RETURN ADDRESS
+        CMPB R0,#SPACE	;SPACE
+        BCS CCEXIT	;BELOW 40
+        CMPB R0,#137	;_
+        BHI CCEXIT	;ABOVE 137
+;
+        TST(R3)+	;INCREMENT RETURN ADDRESS
+CCEXIT: RTS R3
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: CKISET - SET INPUT DEVICE
+;SUBROUTINE: CKOSET - SET OUTPUT DEVICE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+CKISET: MOV #ITABLE,R0
+        BR COMCHK
+;
+CKOSET: MOV #OTABLE,R0
+;
+COMCHK: JSR PC,EVAL		;EVALUATE EXPRESSION
+        BCS ERSX12		;CAN'T BE STRING
+        TST FAC1(R5)		;HI WORD MUST BE ZERO
+        BNE ERCHAN
+        MOV FAC2(R5),R2		;GET CHANNEL NUMBER
+        BEQ OUT012		;CHAN=0 NOTHING TO DO
+        MOVB(R0),R3		;GET OFFSET TO ?DEV(R5)
+        ADD R5,R3		;POINT TO IDEV/ODEV
+        CMP R2,#2		;DEVICE OUT OF RANGE?
+        BHI ERCHAN
+        ADD R2,R0		;INDEX INTO TABLE
+        MOVB(R0),(R3)		;SET DEVICE
+        BEQ ERCHAN
+        MOVB(R0),R2		;RETURN DEVICE CODE
+OUT012: RTS PC
+ERSX12: JMP ERRSX5
+;
+ERCHAN: IOT
+	.IFNDF $LONGER
+        .ASCII 'DCE'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'DEVICE CHANNEL ERROR'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+OTABLE:  .BYTE ODEV
+	.IFDF $NOPTP
+	 .BYTE 0
+	.ENDC
+;
+	.IFNDF $NOPTP
+	 .BYTE 2
+	.ENDC
+;
+	.IFDF $NOLPT
+	 .BYTE 0
+	.ENDC
+;
+	.IFNDF $NOLPT
+	 .BYTE 4
+	.ENDC
+;
+ITABLE:  .BYTE IDEV
+	.IFDF $NOPTP
+	 .BYTE 0
+	.ENDC
+;
+	.IFNDF $NOPTP
+	 .BYTE 2
+	.ENDC
+;
+	 .BYTE 0
+        .EVEN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: CLRVAR - CLEAR VARIABLE SPACE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+CLRVAR: MOV #032331,RND1(R5)	;INIT RANDOM NUMBER
+        MOV #163251,RND2(R5)
+        MOV(R5),R0		;GET USER SPACE POINTER
+;
+CLRLOO: CMP R0,LOFREE(R5)	;POINT TO BOTTOM
+        BCC CLRFRE
+        CMP(R0),#.SCALR
+        BCS CLROK
+;
+	.IFNDF $NOSTR
+        CMP(R0),#.SVAR
+        BEQ CLRSVA
+	.ENDC
+;
+        MOV #.SCALR,(R0)+
+        CLR(R0)
+;
+	.IFNDF $NOSTR
+        BR .+4
+CLRSVA: MOV(R0)+,(R0)
+	.ENDC
+;
+        MOV(R0)+,(R0)
+        MOV(R0)+,(R0)
+CLROK:  ADD #4,R0
+        BR CLRLOO
+        CLR(R0)+
+CLRFRE: CMP R0,ARRAYS(R5)
+        BLOS .-6
+        MOV ARRAYS(R5),HIFREE(R5)
+        MOV LOFREE(R5),LOSTR(R5)
+        MOV LOFREE(R5),HISTR(R5)
+        MOV #33,GSBCTR(R5)	;INIT GOSUB COUNT
+        MOV PDL(R5),R0
+        MOV #.SVAR,(R0)+
+        CLR(R0)+
+        CMP R0,LIMIT(R5)
+        BLOS .-6
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: DIVTEN - DIVIDE BY TEN
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+DIVTEN: MOV #34,-(SP)
+DIVLOO: CMP #50000,R3
+        BHI .+6
+        ADD #130000,R3
+        ROL R4
+        ROL R3
+        DEC(SP)
+        BGT DIVLOO
+        BIC #170000,R3
+        TST(SP)+
+        RTS PC
+;
+	.IFNDF $NOSTR
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SOUBROUTINE: DNPACK - PACK STRING STORAGE 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+DNPACK: MOV R1,-(SP)
+        MOV R2,-(SP)
+        MOV R3,-(SP)
+        CLR -(SP)
+        MOV LOSTR(R5),R2
+        MOV LOFREE(R5),R1
+        MOV R1,LOSTR(R5)
+DNPLOO: CLR(SP)
+        BISB(R2)+,(SP)
+        BNE DNPZER
+DNPBAD: CMP R2,HISTR(R5)
+        BCS DNPLOO
+        MOV R1,HISTR(R5)
+        TST(SP)+
+        MOV(SP)+,R3
+        MOV(SP)+,R2
+        MOV(SP)+,R1
+        RTS PC
+DNPZER: CLR R3
+        BISB(R2)+,R3
+        SWAB R3
+        BISB(R2)+,R3
+        ADD(SP),R2
+        INC R2
+        BIT R3,#1
+        BEQ .+6
+        DEC R3
+        ADD(R5),R3
+        CMP R3,PDL(R5)
+        BCC DNPBAD
+        CMP R3,SP
+        BCC DNPGOO
+        CMP R3,ARRAYS(R5)
+        BHI DNPBAD
+        CMP R3,HIFREE(R5)
+        BHI DNPGOO
+        CMP R3,LOFREE(R5)
+        BCC DNPBAD
+        CMP R3,(R5)
+        BCS DNPBAD
+DNPGOO: ADD #4,(SP)
+        SUB(SP),R2
+        CMP R2,(R3)
+        BNE DNPIGN
+        MOV R1,(R3)
+        MOVB(R2)+,(R1)+
+        DEC(SP)
+        BGT .-4
+        BR DNPBAD
+DNPIGN: ADD(SP),R2
+        BR DNPBAD
+	.ENDC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: EVAL - EVALUATE EXPRESSION
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+EVAL:   CMP SP,R4
+        BCS BPDL
+        MOV #.TERM,-(SP)
+        BR OPERAN
+;
+UMINUS: MOV #.UNARY,-(SP)
+        CMP SP,R4
+BPDL:   BCS ERRPDL
+OPERAN: MOVB(R1)+,R2
+        BGE VARBLE
+        CMPB R2,#.ILIT1
+        BEQ ILIT1
+        CMPB R2,#.ILIT2
+        BEQ ILIT2
+        CMPB R2,#.FLIT
+        BEQ FLIT
+        CMPB R2,#.LPRN
+        BEQ LPAR
+        CMPB R2,#.MINUS
+        BEQ UMINUS
+        CMPB R2,#.PLUS
+        BEQ OPERAN
+        CMPB R2,#.FN
+        BEQ GOTOFN
+;
+	.IFNDF $NOSTR
+        CMPB R2,#.SQUOT
+        BEQ GOTOQT
+        CMPB R2,#.DQUOT
+        BNE NOQUOT
+GOTOQT: JMP QUOTE
+	.ENDC
+;
+NOQUOT: BIC #177400,R2
+        SUB #.RNDL,R2
+        ASL R2
+        CMP R2,#TBL5EN-TABLE5
+        BHI ERRSX4
+        ADD #12,R2
+        ADD PC,R2
+        TST(R2)
+        BGT .+6
+        JMP ERRUFN
+        ADD(R2),PC
+;
+TABLE5: .WORD 0			;rndl
+        .WORD 0			;rnd
+        .WORD SINFN-TABLE5
+        .WORD COSFN-TABLE5
+        .WORD SQRFN-TABLE5
+        .WORD ATNFN-TABLE5
+        .WORD EXPFN-TABLE5
+        .WORD LOGFN-TABLE5
+        .WORD 0			;peek
+        .WORD 0			;fre
+        .WORD 0			;abs
+        .WORD INTFN-TABLE5
+        .WORD 0			;sgn
+        .WORD 0			;tab
+;
+	.IFNDF $NOSTR
+        .WORD 0			;len
+        .WORD 0			;asc
+        .WORD 0			;chr
+        .WORD 0			;pos
+        .WORD 0			;seg
+        .WORD 0			;val
+        .WORD 0			;str
+	.ENDC
+TBL5EN=.-2
+;
+ILIT1:  CLR FAC1(R5)
+        CLRB FAC2+1(R5)
+        MOVB(R1)+,FAC2(R5)
+        JMP OPERAT
+;
+ILIT2:  CLR FAC1(R5)
+        BR ILITCO
+;
+FLIT:   MOVB(R1)+,FAC1+1(R5)
+        MOVB(R1)+,FAC1(R5)
+ILITCO: MOVB(R1)+,FAC2+1(R5)
+        MOVB(R1)+,FAC2(R5)
+        BR OPERAT
+;
+LPAR:   JSR PC,EVAL
+;
+	.IFNDF $NOSTR
+        BCS LPSTRN
+	.ENDC
+;
+        CMPB(R1)+,#.RPRN
+        BEQ OPERAT
+ERRSX4: JMP ERRSX5
+;
+	.IFNDF $NOSTR
+LPSTRN: CMPB(R1)+,#.RPRN
+        BNE ERRSX4
+        JMP SOPRAT
+	.ENDC
+;
+;
+VARBLE: SWAB R2
+        BISB(R1)+,R2
+        ADD(R5),R2
+        CMPB(R1),#.LPRN
+        BEQ VARSS
+;
+	.IFNDF $NOSTR
+        CMP(R2),#.SVAR
+        BEQ STRGJP
+	.ENDC
+;
+        CMP(R2)+,#.SCALR
+        BEQ VARNOS
+        MOV(R2),R2
+        BR VARNOS
+;
+	.IFNDF $NOSTR
+STRGJP: JMP STRGVA
+	.ENDC
+;
+ERRPDL: IOT
+	.IFNDF $LONGER
+        .ASCII 'ETC'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'EXPRESSION TOO COMPLEX'
+	.ENDC
+        .BYTE 0
+        .EVEN
+
+GOTOFN: JMP FNFN
+;
+	.IFNDF $NOSTR
+ERRMX2: JMP ERRMIX
+	.ENDC
+;
+;
+VARSS:  INC R1
+        BLE ERRPDL
+        MOV R2,-(SP)
+        JSR PC,EVAL
+;
+	.IFNDF $NOSTR
+        BCS ERRMX2
+	.ENDC
+;
+        JSR PC,INT
+        TST FAC1(R5)
+        BNE ERRSS2
+        CMPB(R1),#.RPRN
+        BEQ VONESS
+        CMPB(R1)+,#.COMA
+        BNE ERRSX4
+        MOV FAC2(R5),-(SP)
+        JSR PC,EVAL
+;
+	.IFNDF $NOSTR
+        BCS ERRMX2
+	.ENDC
+;
+        JSR PC,INT
+        TST FAC1(R5)
+        BNE ERRSS2
+        CMPB(R1)+,#.RPRN
+        BNE ERRSX4
+        MOV FAC2(R5),R3
+        BMI ERRSS2
+        MOV(SP)+,R0
+        BR VTWOSS
+;
+ERRSS2: JMP ERRSS3
+;
+VONESS: INC R1
+        MOV #177777,R3
+        MOV FAC2(R5),R0
+VTWOSS: BMI ERRSS2
+        MOV(SP)+,R2
+;
+	.IFNDF $NOSTR
+        CMP(R2),#.SVAR
+        BNE .+6
+        JMP STRGAR
+	.ENDC
+;
+        JSR PC,LOCGET
+VARNOS: MOV(R2)+,FAC1(R5)
+        MOV(R2),FAC2(R5)
+;
+OPERAT: MOVB(R1),R3
+        CMPB R3,#.EOL
+        BEQ DOITNO
+        CMPB R3,#.GOTO
+        BEQ DOITNO
+        CMPB R3,#.GOSUB
+        BEQ DOITNO
+        CMPB R3,#.UPARO
+        BCS ERRSX4
+        MOV(SP),R2
+        CMPB R2,#.UPARO
+        BLOS DOITNO
+        CMPB R2,#.SLASH
+        BLOS PREC2
+        CMPB R2,#.MINUS
+        BLOS PREC3
+        CMPB R2,#.EQ
+        BLOS PREC4
+PREC5:  CMPB R3,#.EQ
+        BLOS NOTNOW
+PREC4:  CMPB R3,#.MINUS
+        BLOS NOTNOW
+PREC3:  CMPB R3,#.SLASH
+        BLOS NOTNOW
+PREC2:  CMPB R3,#.UPARO
+        BLOS NOTNOW
+DOITNO: CLR R2
+        BISB(SP)+,R2
+        SUB #.UPARO-1,R2
+        ADD R2,R2
+        ADD PC,R2
+        ADD(R2),PC
+;
+TABLE2: .WORD UPARRO-TABLE2
+        .WORD STAR-TABLE2
+        .WORD SLASH-TABLE2
+        .WORD PLUS-TABLE2
+        .WORD UNARY-TABLE2
+        .WORD MINUS-TABLE2
+        .WORD TERMIN-TABLE2
+;
+NOTNOW: MOV FAC2(R5),-(SP)
+        CMP SP,R4
+        BCS ERRPD5
+        MOV FAC1(R5),-(SP)
+        MOV R3,-(SP)
+        INC R1
+        JMP OPERAN
+;
+TERMIN: CLC
+        RTS PC
+;
+ERRPD5: JMP ERRPDL
+;
+MINUS:  JSR PC,SUBSTK
+UNARY:  TST FAC1(R5)
+        BEQ UNITEG
+        ADD #100000,FAC1(R5)
+        BR OPERAT
+;
+UNITEG: NEG FAC2(R5)
+        BVC OPERAT
+        MOV #044000,FAC1(R5)
+        CLR FAC2(R5)
+        BR OPERAT
+;
+PLUS:   JSR PC,ADDSTK
+        BR OPERAT
+;
+STAR:   MOV #ERROVF,$ERVEC
+        JSR R4,FPPSAV
+        .WORD TSTSTK
+        .WORD PUSHF
+        .WORD $MLR
+        .WORD POP
+        .WORD FPPRES
+STAR1:  JMP OPERAT
+;
+SLASH:  MOV #ERRDIV,$ERVEC
+        JSR R4,FPPSAV
+        .WORD TSTSTK
+        .WORD PUSHF
+        .WORD $DVR
+        .WORD POP
+        .WORD FPPRES
+        BR STAR1
+;
+TSTSTK: TST(SP)
+        BNE TSTS2
+TSTS1:  TST(SP)+
+        JMP $IR
+TSTS2:  JMP @(R4)+
+;
+PUSHF:  MOV FAC2(R5),-(SP)
+        MOV FAC1(R5),-(SP)
+        BEQ TSTS1
+        JMP @(R4)+
+;
+	.IFDF $NOSTR
+SAVCHA:
+ARGB:
+MAKEST:
+SOPRAT:
+STOSVA:
+ERRMIX:
+QUOTBM:
+STPRO:
+	.ENDC
+;
+ERRSX5: IOT
+	.IFNDF $LONGER
+        .ASCII 'SYN'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'SYNTAX ERROR'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+	.IFNDF $NOSTR
+QUOTE:  CMPB(R1)+,#.TEXT
+        BNE ERRSX5
+        MOV R2,R3
+        MOV R1,R2
+        TSTB(R1)+
+        BNE .-2
+        CMP SP,R4
+        BCS ERRPD5
+        MOV R2,-(SP)
+        SUB #3,(SP)
+        MOV R1,-(SP)
+        SUB R2,(SP)
+        CMPB(R1)+,R3
+        BNE ERRSX5
+        DEC(SP)
+        BEQ QUNULL
+        MOV SP,R2
+        ADD #2,R2
+        JSR PC,MAKEST
+        MOV(SP)+,(SP)
+        JMP QUOTBM
+;
+QUNULL: CMP(SP)+,(SP)+
+GOTVAL: MOV #177777,-(SP)
+        BR SOPRAT
+	.ENDC
+;
+ERPD02: JMP ERRPD2
+;
+	.IFNDF $NOSTR
+STRGAR: JSR PC,LOCGET
+        BR STRGBT
+;
+STRGVA: TST(R2)+
+        CMP 2(R2),#177777
+        BEQ STRGBT
+        MOV(R2),R2
+STRGBT: MOV(R2),R3
+        CMP R3,#177777
+        BEQ GOTVAL
+        CMP SP,R4
+        BCS ERPD02
+        CLR -(SP)
+        MOVB(R3),(SP)
+        JSR PC,MAKEST
+SOPRAT: CMPB 2(SP),#.AMPER
+        BEQ CONCAT
+        CMPB(R1),#.AMPER
+        BEQ AMPWAI
+        CMPB 2(SP),#.TERM
+        BNE ERRSX5
+        MOV(SP)+,R0
+        TST(SP)+
+        MOV(SP),R2
+        MOV R0,(SP)
+        INC R0
+        BEQ SOPRX
+        ADD #2,R0
+        MOV SP,R3
+        MOVB R3,-(R0)
+        SWAB R3
+        MOVB R3,-(R0)
+SOPRX:  SEC
+        JMP(R2)
+;
+AMPWAI: MOVB(R1)+,-(SP)
+        JSR PC,EVAL
+        BCS SOPRAT
+ERRMIX: IOT
+	.IFNDF $LONGER
+        .ASCII 'NSM'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'NUMBERS AND STRINGS MIXED'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+CONCAT: CMP(SP),#177777
+        BNE CATNOT
+        CMP(SP)+,(SP)+
+        BR SOPRAT
+;
+CATNOT: MOV 4(SP),R2
+        CMP R2,#177777
+        BNE CATLON
+        MOV(SP)+,R0
+        TST(SP)+
+        MOV R0,(SP)
+        BR CATCOM
+;
+CATLON: CLR R0
+        BISB(R2),R0
+        MOV(SP),R3
+        CMP SP,R4
+        BCS ERPD02
+        CLR -(SP)
+        MOVB(R3),(SP)
+        ADD R0,(SP)
+        CMP(SP),#.TEXT
+        BHI ERRSTR
+        MOV SP,R2
+        ADD #6,R2
+        JSR PC,MAKEST
+        MOV(SP)+,R3
+        MOV 4(SP),R2
+        CLR R0
+        BISB(R2),R0
+        MOV R3,4(SP)
+        ADD R0,R3
+        ADD #3,R3
+        MOV(SP)+,R2
+        TST(SP)+
+        CLR R0
+        BISB(R2),R0
+        ADD #3,R2
+        MOVB(R2)+,(R3)+
+        DEC R0
+        BGT .-4
+;
+STPRO: 
+QUOTBM: MOV(SP),R0
+CATCOM: MOV SP,R2
+        ADD #3,R0
+        MOVB R2,-(R0)
+        SWAB R2
+        MOVB R2,-(R0)
+        BR SOPRAT
+	.ENDC
+;
+ERRPD2: JMP ERRPDL
+;
+	.IFNDF $NOSTR
+ERRSTR: IOT
+	.IFNDF $LONGER
+        .ASCII 'STL'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'STRING TOO LONG'
+	.ENDC
+        .BYTE 0
+        .EVEN
+	.ENDC
+;
+ERROVF: IOT
+	.IFNDF $LONGER
+        .ASCII 'OVF'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'OVERFLOW'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;FUNCTION: SIN
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SINFN:  MOV #SIN,-(SP)
+        BR FUNCTI
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;FUNCTION: COS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+COSFN:  MOV #COS,-(SP)
+        BR FUNCTI
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;FUNCTION: SQR
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SQRFN:  MOV #SQRT,-(SP)
+        MOV #ERRARG,$ERVEC
+        BR FUNCTI
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;FUNCTION: ATN
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+ATNFN:  MOV #ATAN,-(SP)
+        BR FUNCTI
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;FUNCTION: EXP
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+EXPFN:  MOV #EXP,-(SP)
+        MOV #ERROVF,$ERVEC
+        BR FUNCTI
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;FUNCTION: LOG
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LOGFN:  MOV #ALOG,-(SP)
+        MOV #ERRARG,$ERVEC
+        BR FUNCTI
+;
+	.IFNDF $NOSTR
+ERRMX9: JMP ERRMIX
+	.ENDC
+;
+ERRD11: JMP ERRPD2
+;
+FUNCTI: JSR PC,EVAL
+	.IFNDF $NOSTR
+        BCC FUNCTJ
+        JMP ERRARG
+	.ENDC
+;
+FUNCTJ: MOV(SP)+,R3
+        BNE .+6
+        JMP ERRUFN
+        CMPB(R1)+,#.RPRN
+        BNE ERRSX9
+        JSR R4,FPPSAV
+        .WORD PUSHF
+        .WORD FUNOK
+        .WORD FPPRES
+        BR OPRFN
+;
+FUNOK:  MOV SP,R1
+        MOV R4,-(SP)
+        MOV #FUNRET,-(SP)
+        MOV #137,-(SP)
+        MOV R1,-(SP)
+        MOV #401,-(SP)
+        MOV R5,R0
+        MOV SP,R5
+        JSR R0,@R3SAVE(R0)
+FUNRET: ADD #10,SP
+        MOV(SP)+,R4
+        CMP(SP)+,(SP)+
+        MOV R0,FAC1(R5)
+        MOV R1,FAC2(R5)
+        JMP @(R4)+
+;
+	.IFNDF $NOSTR
+ERRMX8: JMP ERRMIX
+	.ENDC
+;
+INTFN:  JSR PC,EVAL
+;
+	.IFNDF $NOSTR
+        BCS ERRMX8
+	.ENDC
+;
+        CMPB(R1)+,#.RPRN
+        BNE ERRSX9
+        JSR PC,INT
+OPRFN:  JMP OPERAT
+;
+ERRSX9: JMP ERRSX5
+;
+UPARRO: TST(SP)
+        BNE UAR1
+        TST 2(SP)
+        BEQ UAR1
+        TST(SP)+
+        JSR R4,FPPSAV
+        .WORD $IR
+        .WORD FPPRES
+;
+UAR1:   MOV #ERREXP,$ERVEC
+        TST FAC1(R5)
+        BNE UPAR10
+        TST FAC2(R5)
+        BNE UPAR5
+        MOV #1,FAC2(R5)
+UPAR4:  CMP(SP)+,(SP)+
+        JMP OPERAT
+;
+UPAR5:  TST(SP)
+        BNE UAR17
+        TST FAC2(R5)
+        BPL UPAR9
+UPAR8:  IOT
+	.IFNDF $LONGER
+        .ASCII 'DV0'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'DIVIDE BY ZERO'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+ERRDIV: CMP R0,#4000
+        BCC UPAR8
+        JMP ERROVF
+        BCC UPAR8
+        JMP ERROVF
+;
+UPAR9:  CLR FAC1(R5)
+        CLR FAC2(R5)
+        BR UPAR4
+;
+UPAR10: TST FAC2(R5)
+        BNE UAR105
+        MOV FAC1(R5),R0
+        MOV R0,R2
+        BIC #100177,R0
+        CMP R0,#40200
+        BCS UAR105
+        BIC #177600,R2
+        BIS #200,R2
+UAR10A: CMP R0,#42000
+        BEQ UAR10B
+        BHI UAR105
+        ASR R2
+        BCS UAR105
+        ADD #200,R0
+        BR UAR10A
+;
+UAR10B: TST FAC1(R5)
+        BPL UAR10C
+        NEG R2
+UAR10C: CLR FAC1(R5)
+        MOV R2,FAC2(R5)
+        BR UPAR5
+;
+UAR105: TST(SP)
+        BEQ UAR12
+        JSR R4,FPPSAV
+        .WORD PUSH
+        .WORD UARJMP
+        .WORD UAR23
+UAR12:  TST FAC1(R5)
+        BPL UPAR9
+        BR UPAR8
+;
+UAR17:  MOV FAC2(R5),R0
+        MOV R0,R2
+        BGE UAR17A
+        NEG R0
+UAR17A: CMP R0,#.LPRN
+        BCC UAR20
+        JSR R4,FPPSAV
+        .WORD POP
+        .WORD PUSH1
+UAR17B: .WORD UAASR
+        .WORD UAR17D
+        .WORD PUSH
+        .WORD $MLR
+UAR17D: .WORD UATST0
+        .WORD UAR17F
+        .WORD PUSH
+        .WORD PUSH
+        .WORD $MLR
+        .WORD POP
+        .WORD UARJMP
+        .WORD UAR17B
+UAR17F: .WORD POP
+        .WORD UATST2
+        .WORD UAR19
+        .WORD PUSH1
+        .WORD PUSH
+        .WORD $DVR
+        .WORD POP
+UAR19:  .WORD FPPRES
+        JMP OPERAT
+;
+ERREXP: 
+UAR21:  IOT
+	.IFNDF $LONGER
+        .ASCII '^ER'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII '^ERROR'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+UAASR:  ASR R0SAVE(R5)
+        BCC UARJMP
+;
+UANJMP: TST(R4)+
+        JMP @(R4)+
+;
+UARJMP: MOV(R4),R4
+        JMP @(R4)+
+;
+UATST0: TST R0SAVE(R5)
+        BEQ UARJMP
+        BR UANJMP
+;
+UATST2: TST R2SAVE(R5)
+        BPL UARJMP
+        BR UANJMP
+;
+UATSTA: TST(SP)
+        BMI UAR21
+        JMP @(R4)+
+;
+UAR20:  MOV R2,-(SP)
+        JSR R4,FPPSAV
+        .WORD $IR
+UAR23:  .WORD REVRSE
+        .WORD UATSTA
+        .WORD CALOG
+        .WORD PUSH
+        .WORD $MLR
+        .WORD CAEXP
+        .WORD FPPRES
+        JMP OPERAT
+;
+REVRSE: MOV(SP)+,R0
+        MOV(SP)+,R1
+        MOV(SP)+,R2
+        MOV(SP)+,R3
+        MOV R1,-(SP)
+        MOV R0,-(SP)
+        MOV R3,-(SP)
+        MOV R2,-(SP)
+        JMP @(R4)+
+;
+CALOG:  MOV #ALOG,R3SAVE(R5)
+        JMP FUNOK
+;
+CAEXP:  MOV #EXP,R3SAVE(R5)
+        JMP FUNOK
+;
+ERRPD4: JMP ERRPDL
+	.IFNDF $NOSTR
+ERRMX1: JMP ERRMIX
+	.ENDC
+ERRSXA: JMP ERRSX5
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;USER DEFINED FUNCTION
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+FNFN:   MOVB(R1)+,R2
+        CMPB(R1)+,#.LPRN
+        BNE ERRSXA
+        ADD PDL(R5),R2
+        CMP SP,R4
+        BCS ERRPD4
+        MOV(R2),R0
+        BEQ ERRUFN
+FNSWAP: MOV R0,-(SP)
+        JSR PC,EVAL
+;
+	.IFNDF $NOSTR
+        BCS FNSTR
+	.ENDC
+;
+        MOV(SP)+,R0
+        MOVB(R0)+,R2
+        BMI ERRAG1
+        SWAB R2
+        BISB(R0)+,R2
+        ADD(R5),R2
+;
+	.IFNDF $NOSTR
+        CMP(R2),#.SVAR
+        BEQ ERRMX1
+	.ENDC
+;
+        CMP(R2)+,#.SCALR
+        BEQ .+4
+        MOV(R2),R2
+        CMP SP,R4
+        BCS ERRPD4
+        MOV(R2),-(SP)
+        MOV FAC1(R5),(R2)+
+        MOV(R2),-(SP)
+        MOV FAC2(R5),(R2)
+        BR FNREPL
+;
+	.IFNDF $NOSTR
+FNSTR:  MOV 2(SP),R0
+        MOVB(R0)+,R2
+        BMI ERRAG1
+        SWAB R2
+        BISB(R0)+,R2
+        ADD(R5),R2
+        CMP(R2)+,#.SVAR
+        BNE ERRMX1
+        CMP 2(R2),#177777
+        BEQ .+4
+        MOV(R2),R2
+        MOV(R2),R3
+        MOV(SP)+,(R2)
+        MOV R3,(SP)
+        MOV R2,-(SP)
+        MOV(R2),R2
+        INC R2
+        BEQ FNNEWN
+        INC R3
+        BNE FNOLNN
+        MOVB 1(SP),(R2)+
+        MOVB(SP)+,(R2)
+        BR FNREPL
+;
+FNOLNN: MOVB(R3)+,(R2)+
+        MOVB(R3),(R2)
+        SUB #2,R3
+FNNEWN: TST(SP)+
+        MOV SP,R2
+        INC R3
+        BEQ FNREPL
+        SWAB R2
+        MOVB R2,(R3)+
+        SWAB R2
+        MOVB R2,(R3)
+	.ENDC
+;
+FNREPL: CMPB(R0),#.COMA
+        BNE FNNOCO
+        CMPB(R0)+,(R1)+
+        BEQ FNSWAP
+ERRAG1: JMP ERRARG
+;
+ERRUFN: IOT
+	.IFNDF $LONGER
+        .ASCII 'UFN'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'UNDEFINED FUNCTION'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+FNNOCO: CMPB(R0),#.RPRN
+        BNE ERRAG1
+        MOV R0,-(SP)
+        CMPB(R0)+,(R1)+
+        BNE ERRAG1
+        CMPB(R0)+,#.EQ
+        BNE ERRAG1
+        MOV R1,-(SP)
+        MOV R0,R1
+        JSR PC,EVAL
+        BCS .+6
+        CLR R3
+        BR .+4
+        MOV(SP)+,R3
+        CMPB(R1),#.EOL
+        BNE ERRSXA
+        MOV(SP)+,R1
+        MOV(SP)+,R0
+FNRLUP: MOVB -(R0),-(SP)
+        MOVB -(R0),1(SP)
+        MOV(SP)+,R2
+        ADD(R5),R2
+;
+	.IFNDF $NOSTR
+        CMP(R2),#.SVAR
+        BEQ FNRSTR
+	.ENDC
+        CMP(R2)+,#.SCALR
+        BEQ .+4
+        MOV(R2),R2
+        MOV(SP)+,2(R2)
+        MOV(SP)+,(R2)
+        BR FNCHEK
+;
+FNRSSC: MOV(SP)+,(R2)
+        MOV R0,-(SP)
+        MOV(R2),R0
+        SUB(R5),R2
+        INC R2
+;
+	.IFNDF $NOSTR
+        BR FNRCOM
+FNRSTR: TST(R2)+
+        CMP 2(R2),#177777
+        BEQ FNRSSC
+        MOV(R2),R2
+        MOV(SP)+,(R2)
+        MOV R0,-(SP)
+        MOV(R2),R0
+	.ENDC
+;
+FNRCOM: INC R0
+        BEQ FNRSNU
+        SWAB R2
+        MOVB R2,(R0)+
+        SWAB R2
+        MOVB R2,(R0)+
+FNRSNU: MOV(SP)+,R0
+FNCHEK: CMPB -(R0),#.LPRN
+        BNE FNRLUP
+;
+	.IFNDF $NOSTR
+        TST R3
+        BEQ FNNUMR
+        MOV R3,-(SP)
+        CMP R3,#177777
+        BNE .+6
+        JMP SOPRAT
+        JMP QUOTBM
+	.ENDC
+;
+FNNUMR: JMP OPERAT
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: FIXUP - MATCHES TYPES (INT OR FLOAT)
+; OF 0(SP) 2(SP) WITH FAC1(R5) FAC2(R5)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+FIXUP:  MOV(SP)+,R2
+        TST(SP)
+        BEQ FIXTST
+        TST FAC1(R5)
+        BNE FIXRET
+        MOV FAC2(R5),-(SP)
+        JSR R4,FPPSAV
+        .WORD $IR
+        .WORD POP
+        .WORD FPPRES
+        BR FIXCLZ
+;
+FIXTST: TST FAC1(R5)
+        BEQ FIXRET
+        TST(SP)+
+        JSR R4,FPPSAV
+        .WORD $IR
+        .WORD FPPRES
+FIXCLZ: CLZ
+FIXRET: JMP(R2)
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: FLINE - FIND ADDRESS OF LINE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+FLINE:  MOVB(R1)+,R2
+        BMI FLE
+        SWAB R2
+        BISB(R1)+,R2
+        ADD(R5),R2
+        MOV(R2)+,R0
+        CMP R0,#.SCALR
+        BCS FLX
+FLE:    SEC
+        RTS PC
+FLX:    CLC
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: FPPRES - RESTORE REGISTERS
+;AND RETURN FROM POLISH MODE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+FPPRES: MOV R0SAVE(R5),R0
+        MOV R1SAVE(R5),R1
+        MOV R2SAVE(R5),R2
+        MOV R3SAVE(R5),R3
+        MOV R4SAVE(R5),-(SP)
+        RTS R4
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;ROUTINE: FPPSAV - SAVE REGISTERS AND
+;ENTER POLISH MODE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+FPPSAV: MOV R0,R0SAVE(R5)
+        MOV R1,R1SAVE(R5)
+        MOV R2,R2SAVE(R5)
+        MOV R3,R3SAVE(R5)
+        MOV(SP)+,R4SAVE(R5)
+        JMP @(R4)+
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: GET1BY - GET 1 BYTE FROM BUFFER
+;SUBROUTINE: GET2BY - GET 2 BYTE FROM BUFFER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+GET1BY: MOV #4,R3
+        BR GETBYT
+GET2BY: MOV #6,R3
+
+	.IFDF LSI11
+GETBYT: MFPS -(SP)		;SAVE PS
+	MTPS #340		;MASK OFF INTERRUPTS
+	.ENDC	
+
+	.IFNDF LSI11
+GETBYT: MOV #PS,R2		;POINT TO PS REGISTER
+        MOV (R2),-(SP)		;SAVE PS
+        MOV #340,(R2)		;MASK OFF INTERRUPTS
+	.ENDC
+
+        ADD R1,R3
+        CMP(R3),10(R1)
+        BEQ BUFEMP		;NO DATA AVAILABLE
+        MOVB @(R3)+,R0
+        INC -(R3)
+        CMP(R3),2(R1)
+        BLOS NOWRP
+        MOV 0(R1),(R3)
+
+	.IFDF LSI11
+NOWRP:  MTPS (SP)+		;RESTORE PS
+        CLC
+        RTS PC
+BUFEMP: MTPS (SP)+		;RESTORE PS
+        SEC			;SET ERROR FLAG
+        RTS PC
+	.ENDC
+
+	.IFNDF LSI11
+NOWRP:  MOV (SP)+,(R2)		;RESTORE PS
+        CLC
+        RTS PC
+BUFEMP: MOV (SP)+,(R2)		;RESTORE PS
+        SEC			;SET ERROR FLAG
+        RTS PC
+	.ENDC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: GETCHR - RETURN A CHARACTER
+; OR WAIT UNTILL YOU CAN
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+GETCHR: MOV R2,-(SP)		;SAVE R2
+GETCH1: JSR PC,GET1BY		;GET BYTE
+        BCS NOCHAR		;NOTHING AVAILABLE?
+        MOV 12(R1),R2		;ANY ROOM?
+        BGT XCHAR
+GETX:   MOV(SP)+,R2		;RECOVER R2
+        RTS PC			;EXIT
+NOCHAR: MOV 12(R1),R0
+        BEQ REENAB
+        CLR 12(R1)
+        SEC
+        BR GETX
+;
+;WAIT FOR ROOM ON OUTPUT QUEUE
+XCHAR:  MOV R0,-(SP)
+        MOV R2,R0
+        JSR PC,PUTBYT		;PUT BYTE IN QUEUE
+        BCC .+4
+        HALT			;INPUT OVERRUN
+        MOV(SP)+,R0
+        CLR 12(R1)
+        MOVB IDEV(R5),R2
+        MOV #101,@IPDEVC(R2)
+        BR GETX
+;
+REENAB: MOVB IDEV(R5),R2	;GET DEVICE
+        BIT #4000,@IPDEVC(R2)
+        BNE GCWAIT
+        MOV #101,@IPDEVC(R2)	;REENABLE INTERRUPTS
+GCWAIT: WAIT
+        JSR PC,IOWAIT		;RUN IDLE PROCESS
+        BR GETCH1
+;
+;TABLE OF DEVICE STATUS REGISTERS
+IPDEVC: .WORD  TKS
+        .WORD  PRS
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: GETVAR - GET LOCATION OF VARIABLE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+GETVAR: MOV R2,VARSAV(R5)
+        MOV #177777,R2
+        MOV R2,SS1SAV(R5)
+        MOV R2,SS2SAV(R5)
+        CMPB(R1),#.LPRN		;LEFT PAREN?
+        BNE NOSUBS		;NO SUBSCRIPTS
+        INC R1
+        JSR PC,EVAL		;EVAL 1ST SUBSCRIPT
+;
+	.IFNDF $NOSTR
+        BCS ERRMX3
+	.ENDC
+;
+        JSR PC,INT		;MAKE INTEGER
+        TST FAC1(R5)
+        BNE ERRSS1
+        MOV FAC2(R5),SS1SAV(R5)	;SAVE SUBSCRIPT 1
+        BMI ERRSS1
+        MOVB(R1)+,R2		;GET NEXT TOKEN
+        CMPB R2,#.RPRN		;RIGHT PAREN?
+        BEQ NOSUBS		;SINGLE SUBSCRIPT
+        CMPB R2,#.COMA		;COMMA SEPRATOR
+        BNE ERRSX3		;SYNTAX ERROR
+        JSR PC,EVAL		;EVAL 2ND SUBSCRIPT
+;
+	.IFNDF $NOSTR
+        BCS ERRMX3
+	.ENDC
+;
+        JSR PC,INT		;MAKE INTEGER
+        TST FAC1(R5)
+        BNE ERRSS1
+        MOV FAC2(R5),SS2SAV(R5)	;SAVE SUBSCRIPT 22
+        BMI ERRSS1
+        CMPB(R1)+,#.RPRN	;RIGHT PAREN?
+        BNE ERRSX3		;THEN SYNTAX ERROR
+NOSUBS: RTS PC			;DONE
+;
+ERRSX3: JMP ERRSX5
+;
+	.IFNDF $NOSTR
+ERRMX3: JMP ERRMIX
+	.ENDC
+;
+ERRSS1: JMP ERRSS2
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: INITBF - INIT BUFFER HEADER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+INITBF: MOV(R2)+,R3
+        TST(R2)+
+        MOV R3,(R2)+
+        TST(R2)+
+        MOV R3,(R2)+
+        CLR(R2)+
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: INITSC - INIT USER AREA
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+INITSC: MOV CODE(R5),R0
+        MOV #.EOF,(R0)+
+        MOV R0,(R5)
+        MOV R0,LOFREE(R5)
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: INT - CONVERT FAC1,FAC2 TO 
+;INTEGER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+INT:    MOV FAC1(R5),R0
+        BEQ INTRTS
+        JSR R5,SAVREG
+        MOV R0,R1
+        BIC #100177,R0
+        CMP R0,#40200
+        BCS INT7
+        CMP R0,#46000
+        BHI INTRTS
+        CLR R2
+        SUB #43600,R0
+        BGT INT5
+        SWAB R1
+        CLRB R1
+        BISB FAC2+1(R5),R1
+        BIS #100000,R1
+        CLC
+        ROR R1
+        TST R0
+        BGE INT1A
+INT1:   ASR R1
+        ADC R2
+        ADD #200,R0
+        BLT INT1
+INT1A:  TST FAC1(R5)
+        BPL INT2
+        TST R2
+        BEQ INT1B
+        INC R1
+        BVS INT9
+INT1B:  NEG R1
+INT2:   MOV R1,FAC2(R5)
+INT2A:  CLR FAC1(R5)
+INTRTS: RTS PC
+;
+INT5:   CMP R0,#2200
+        BGE INT6
+        SEC
+        ROL R2
+        ADD #200,R0
+        BR INT5
+INT6:   MOV FAC2(R5),R0
+        BIC R2,FAC2(R5)
+        TST FAC1(R5)
+        BPL INTRTS
+        BIT R2,R0
+        BEQ INTRTS
+        JSR R4,$POLSH
+        .WORD PUSH
+        .WORD PUSH1
+        .WORD $SBR
+        .WORD POP
+        .WORD INTRTS
+;
+INT7:   TST R1
+        BMI INT8
+        CLR FAC2(R5)
+        BR INT2A
+;
+INT8:   MOV #177777,FAC2(R5)
+        BR INT2A
+;
+INT9:   MOV #143600,FAC1(R5)
+        CLR FAC2(R5)
+        BR INTRTS
+;
+PUSH:   MOV FAC2(R5),-(SP)
+        MOV FAC1(R5),-(SP)
+        JMP @(R4)+
+;
+POP:    MOV(SP)+,FAC1(R5)
+        MOV(SP)+,FAC2(R5)
+        JMP @(R4)+
+;
+PUSH1:  CLR -(SP)
+        MOV #40200,-(SP)
+        JMP @(R4)+
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: IOWAIT - WASTE TIME UNTILL
+; NEXT  INTERRUPT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+IOWAIT: INC RNDCT(R5)		;INC RANDOM SEED
+        TSTB CNCFLG(R5)		;CTRL 'C' PRESSED?
+        BEQ WTRET
+        JMP READY		;RETURN TO READY
+WTRET:  TST @#SYSIDL		;CHECK IDLE TASK
+        BEQ .+6			;NONE CONFIGURED?
+        JMP @#SYSIDL		;JUMP TO IT
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: LINGET - EDIT A LINE INTO 
+; LINE BUFFER 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LINGET: JSR R5,SAVREG		;SAVE REGISTERS
+;
+;LINE DELETE
+LINA:   MOVB IDEV(R5),R0	;GET INPUT DEVICE
+        MOV TAB3(R0),R1		;GET DEVICE BUFFER HEADER
+        TST R0
+        BNE LINEIN
+        ADD R5,R1		;POINT TO DEVICE BUFFER
+        MOV(R1),R1
+LINEIN: MOV LINE(R5),R2		;POINT TO BUFFER
+;
+;RUBOUT
+LINRUB: CMP R2,LINE(R5)		;AT START?
+        BEQ DOCHAR		;THEN SKIP
+        DEC R2			;BACKUP POINTER
+;
+;NOT ALPHA
+DOCHAR: JSR PC,GETCHR		;GET ANOTHER CHARACTER
+        BCC GOTONE
+        RTS PC			;EXIT IF ERROR
+;
+GOTONE: MOVB R0,(R2)		;PUT IN LINE BUFFER
+        JSR R3,CHKCHR		;CLASSIFY CHARACTER
+        BR LINA			;LINE DELETE
+        RTS PC			;RETURN
+        BR LINRUB		;RUBOUT
+        BR DOCHAR		;NOT ALPHANUMERIC
+;
+;GOT ALPHA CHARCTER
+        INC R2			;INC BUFFER POINTER
+        CMP R2,CODE(R5)		;OUT OF BUFFER SPACE?
+        BCS DOCHAR		;GET NEXT CHAR
+        JSR R1,MSGERR		;REPORT ERROR
+;
+        .BYTE 15,12
+	.IFNDF $LONGER
+        .ASCII 'LTL'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'LINE TOO LONG'
+	.ENDC
+        .BYTE 15,12,0
+        .EVEN
+
+        BR LINEIN
+;
+;TABLE OF INPUT DEVICE HEADERS
+TAB3:   .WORD KBHD
+        .WORD PRBFHD
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: LITEVA - EVALUATE A LITERAL
+;RETURNS TO CALLER +2 IF GOOD LITERAL VALUE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LITEVA: CLR R0
+        CLR FAC1(R5)
+        CLR FAC2(R5)
+        CMPB(R3),#.PLUS
+        BEQ LEVPLU
+        CMPB(R3),#.MINUS
+        BNE LEVLIT
+        COM R0
+LEVPLU: INC R3
+LEVLIT: CMPB(R3)+,#.ILIT1
+        BEQ LEV1LT
+        CMPB -(R3),#.FLIT
+        BEQ LEVFLT
+        CMPB(R3)+,#.ILIT2
+        BEQ LEV2LT
+        RTS PC			;BAD RETURN
+;
+LEVFLT: INC R3
+        MOVB(R3)+,FAC1+1(R5)
+        MOVB(R3)+,FAC1(R5)
+LEV2LT: MOVB(R3)+,FAC2+1(R5)
+LEV1LT: MOVB(R3)+,FAC2(R5)
+        TST R0
+        BEQ LEVPOS
+        TST FAC1(R5)
+        BNE LEVFNE
+        NEG FAC2(R5)
+        BR LEVPOS
+;
+LEVFNE: ADD #100000,FAC1(R5)
+LEVPOS: ADD #2,(SP)
+        RTS PC			;GOOD RETURN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: LOCGET - GET LOCATION OF ARRAY
+; ELEMENT
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LOCGET: CMP(R2),#.SCALR
+        BEQ LOCALO
+        TST 4(R2)
+        BPL LOCSS1
+LOCALO: MOV R2,-(SP)
+        MOV R4,-(SP)
+        MOV R3,-(SP)
+;
+	.IFNDF $NOSTR
+        JSR PC,DNPACK
+	.ENDC
+;
+        MOV #12,R3
+        MOV(SP),R4
+        BMI .+4
+        MOV R3,R4
+        JSR PC,ALLOC
+        MOV(SP)+,R3
+        MOV(SP)+,R4
+        MOV(SP)+,R2
+LOCSS1: CMP R0,4(R2)
+        BHI ERRSS3
+        TST R3
+        BMI LOCNO2
+        TST 6(R2)
+        BMI ERRSS3
+        CMP R3,6(R2)
+        BHI ERRSS3
+        MOV 4(R2),-(SP)
+        INC(SP)
+        MOV R3,-(SP)
+        MOV #20,-(SP)
+LOCLOO: ASL R3
+        ASL 2(SP)
+        BCC .+6
+        ADD 4(SP),R3
+        DEC(SP)
+        BGT LOCLOO
+        CMP(SP)+,(SP)+
+        TST(SP)+
+        ADD R3,R0
+LOCNO2: INC R0
+        ASL R0
+;
+	.IFNDF $NOSTR
+        CMP(R2),#.SVAR
+        BEQ .+4
+	.ENDC
+;
+        ASL R0
+        MOV 2(R2),R2
+        ADD R0,R2
+        RTS PC
+;
+ERRSS3: IOT
+	.IFNDF $LONGER
+        .ASCII 'SOB'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'SUBSCRIPT OUT OF BOUNDS'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: LSTPRO - LIST PROGRAM
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LSTPRO: MOV CODE(R5),R1		;POINT TO PROGRAM
+LSTLOO: MOVB(R1)+,R2		;GET NEXT TOKEN
+        BGE LSTPTR
+        CMPB R2,#.EOL		;END OF LINE?
+        BEQ LSTEOL
+        CMPB R2,#.EOF		;END OF PROGRAM?
+        BNE .+4
+        RTS PC
+;
+        CMPB R2,#.FLIT
+        BCC LSTSPE
+        BIC #177400,R2		;MASK OFF HI BYTE
+        MOV PC,R3
+LSTPC:  ADD #KEYWDS-LSTPC,R3	;POINT TO KEYWORDS
+LSTSRC: MOV R3,R4		;SET POINTER TO START OF WORD
+        MOVB(R3)+,R0		;GET NEXT CHARACTER
+        BPL .-2			;LOOP TILL TOKEN
+        CMPB R0,R2		;COMPARE TO TOKEN I WANT
+        BNE LSTSRC		;LOOP IF NOT EQ
+        CMPB R2,#.GOTO		;jcl CHECK FOR ON GOTO GOSUB
+        BEQ LSTGOT		;jcl
+        CMPB R2,#.GOSUB		;jcl
+        BNE LSTKWD
+LSTGOT: CMPB -4(R1),#.EOL	;FIRST THING ON LINE?
+        BEQ LSTKWD
+        CMPB -2(R1),#.EOL	;\GOTO OR \GOSUB?
+        BEQ LSTKWD
+        MOV CODE(R5),-(SP)	;AT BEGINNING OF LINE?
+        ADD #3,(SP)
+        CMP (SP)+,R1
+        BEQ LSTKWD
+        JSR R1,MSGODE		;PRINT SPACE
+        .ASCII ' '
+        .BYTE 0
+        .EVEN
+;
+;TOKEN FOUND SO PRINT IT OUT
+LSTKWD: MOVB(R4)+,R0		;GET NEXT CHARACTER
+        BMI LSTCHK		;END OF WORD?
+        JSR PC,PUTCHA		;PRINT IT
+        BR LSTKWD
+;
+LSTCHK: CMPB -(R1),#.NEXT	;
+        BEQ LSTNEX
+        CMPB(R1)+,#.FN
+        BNE LSTLOO
+LSTFN:  MOVB(R1)+,R0
+        ADD #200,R0
+        ROR R0
+        BR LSTCHA
+;
+LSTNEX: ADD #13,R1
+        BR LSTLOO
+;
+;TOKEN EQ EOL
+LSTEOL: MOVB(R1),R2		;GET NEXT TOKEN 
+        BPL LSTLIN
+        CMPB R2,#.EOF		;IS IT EOF
+	BNE LSTBSL		;SOME OTHER TOKEN
+;
+;PRINT CRLF
+LSTCRL: JSR R1,MSGODE
+;
+        .BYTE 15,12,0
+        .EVEN
+;
+        BR LSTLOO
+;
+;GOT END OF LINE
+LSTLIN: SWAB R2
+        INC R1
+        BISB(R1),R2
+        DEC R1
+        ADD(R5),R2
+        CMP(R2),#.SCALR
+        BCS LSTCRL
+;
+;GOT EOL FOLLOWED BY ANOTHER TOKEN 
+LSTBSL: MOV #'\,R0		;PRINT STATEMENT SEPERATOR '\'
+LSTCHA: JSR PC,PUTCHA
+        BR LSTLOO
+;
+;LIST SPECIAL
+LSTSPE: CMPB R2,#.FLIT
+        BEQ LSTFIL
+        CMPB R2,#.ILIT2
+        BCS LSTIL1
+        BEQ LSTIL2
+LSTEXT: MOVB(R1)+,R0		;GET BYTE OF TEXT
+        BEQ LSTLOO		;END OF TEXT?
+        JSR PC,PUTCHA		;PRINT IT
+        BR LSTEXT
+LSTIL1: CLRB FAC2+1(R5)
+        MOVB(R1)+,FAC2(R5)
+        BR LSTILB
+LSTIL2: MOVB(R1)+,FAC2+1(R5)
+        MOVB(R1)+,FAC2(R5)
+LSTILB: CLR FAC1(R5)
+        BR LSTFLB
+;
+LSTFIL: MOVB(R1)+,FAC1+1(R5)
+        MOVB(R1)+,FAC1(R5)
+        MOVB(R1)+,FAC2+1(R5)
+        MOVB(R1)+,FAC2(R5)
+LSTFLB: JSR PC,NUMOUT
+LSTJMP: JMP LSTLOO
+;
+;NOT A TOKEN
+LSTPTR: SWAB R2
+        BISB(R1)+,R2
+        ADD(R5),R2
+        CMP(R2),#.SCALR
+        BCC LSTVAR
+        MOV(R2),R2
+        BLT LSTLNO
+        MOV R2,FAC2(R5)
+        CLR FAC1(R5)
+        BR LSTLNX
+;
+;LIST LINE NUMBER
+LSTLNO: MOVB R2,FAC2+1(R5)
+        CLRB FAC2(R5)
+        SWAB R2
+        MOVB R2,FAC1(R5)
+        CLRB FAC1+1(R5)
+        ADD #43600,FAC1(R5)
+LSTLNX: JSR PC,NUMOUT
+        MOV #SPACE,R0
+        BR LSTCHA
+;
+;LIST VARIABLE
+LSTVAR: MOVB 10(R2),R0
+        JSR PC,PUTCHA
+        MOVB 11(R2),R0
+        BEQ .+6
+        JSR PC,PUTCHA
+;
+	.IFDF $NOSTR
+	BR LSTJMP
+	.ENDC
+;
+	.IFNDF $NOSTR
+        CMP(R2),#.SVAR
+        BNE LSTJMP
+        MOV #44,R0
+        BR LSTCHA
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: MAKSTR - MAKE A BASIC STRING
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+MAKEST: JSR PC,MAKETR		;TRY TO ALLOCATE STRING
+        BLOS MAKGOT		;SUCCESS?
+        JSR PC,DNPACK		;PACK SPACE
+        JSR PC,MAKETR		;TRY AGAIN
+        BLOS MAKGOT		;SUCESS?
+;
+ERRSOV: IOT
+	.IFNDF $LONGER
+        .ASCII 'SSO'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'STRING STORAGE OVERFLOW'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+MAKCHK: JSR PC,MAKETR
+        BHI ERRSOV
+MAKGOT: MOV R0,HISTR(R5)
+        MOV 2(SP),R0
+        MOV(R2),R2
+        ADD #3,R2
+        MOVB R0,(R3)+
+        CMPB(R3)+,(R3)+
+        MOVB(R2)+,(R3)+
+        DEC R0
+        BGT .-4
+        MOV 2(SP),R0
+        MOVB R0,(R3)
+        SUB R0,R3
+        MOV SP,R0
+        TST(R0)+
+        MOVB R0,-(R3)
+        SWAB R0
+        MOVB R0,-(R3)
+        DEC R3
+        MOV R3,2(SP)
+        RTS PC
+;
+MAKETR: MOV HISTR(R5),R0
+        MOV R0,R3
+        ADD 4(SP),R0
+        ADD #4,R0
+        CMP R0,HIFREE(R5)
+        RTS PC
+	.ENDC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: MPYTEN - MULTIPLY R3,R4
+; BY DECIMAL 10
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+MPYTEN: MOV R3,-(SP)
+        MOV R4,-(SP)
+        ASL R4
+        ROL R3
+        ASL R4
+        ROL R3
+        ADD(SP)+,R4
+        ADC R3
+        ADD(SP)+,R3
+        ASL R4
+        ROL R3
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: MSGERR - PRINT ERROR MESSAGE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+MSGERR: MOVB #'%,R0
+        BR MSGCOM
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: MSG - PRINT MESSAGE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+MSG:    MOVB(R1)+,R0		;GET MESSAGE BYTE
+MSGCOM: CLRB CNOFLG(R5)		;RESET I/O TO TTY
+        MOV COLUMN(R5),-(SP)	;SAVE COLUMN COUNT
+        MOV #CLMNTT,COLUMN(R5)	;SET COLUMN COUNT TO TERM
+        ADD R5,COLUMN(R5)
+        BR FRSTOU
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: MSGODE - PRINT MESSAGE TO 
+; CURRENT DEVICE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+MSGODE: MOV COLUMN(R5),-(SP)	;SAVE COLUMN COUNTER
+DOMSG:  MOVB(R1)+,R0		;GET CHARECTER
+        BEQ LINDUN
+FRSTOU: JSR PC,PUTCHA		;PRINT IT
+        BR DOMSG		;LOOP TILL END OF MESSAGE
+;
+LINDUN: INC R1			;MAKE RETURN ADDRESS
+        ASR R1			;EVEN
+        ASL R1
+        MOV(SP)+,COLUMN(R5)	;RESTORE COLUMN COUNTER
+        RTS R1
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: NORM - NORMALIZE INTEGER IN
+; FAC1(R5) FAC2(R5)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+NORM:   MOV #237,-(SP)
+        TST R3
+        BEQ LITTST
+        BPL LITNOR
+        ROR R3
+        ROR R4
+        INC(SP)
+LITNOR: BIT R3,#40000
+        BNE LITOK
+        ASL R4
+        ROL R3
+        DEC(SP)
+        BR LITNOR
+;
+LITTST: TST R4
+        BNE LITNOR
+        TST(SP)+
+        RTS PC
+;
+LITOK:  TST R2
+        BEQ LITSTO
+        BMI LITDIV
+        ASR R3
+        ROR R4
+        ASR R3
+        ROR R4
+        ASR R3
+        ROR R4
+        ASR R3
+        ROR R4
+        ADD #4,(SP)
+        JSR PC,MPYTEN
+        DEC R2
+        BR LITNOR
+;
+LITDIV: JSR PC,DIVTEN
+        INC R2
+        BR LITNOR
+;
+LITSHR: ASR R3
+        ROR R4
+LITSTO: BIT R3,#177000
+        BNE LITSHR
+        TST(SP)
+        BGT .+6
+        MOV #1,(SP)
+        CMP(SP),#377
+        BLOS .+6
+        MOV #377,(SP)
+        MOVB R3,1(SP)
+        MOV(SP)+,R3
+        SWAB R3
+        ROR R3
+        ROR R4
+        RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: NUMOUT - OUTPUT UNSIGNED NUMBER
+; FROM FAC
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+NUMOUT: JSR R5,SAVREG
+        MOV #PUTCHA,R1
+        BR NUMSTT
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: NUMSGN - OUTPUT SIGNED NUMBER
+; FROM FAC
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+NUMSGN: MOV @0(SP),R0
+        ADD #2,(SP)
+        JSR R5,SAVREG
+        MOV R0,R1
+        TST FAC1(R5)
+        BEQ NUMFIX
+        BPL NUMPOS
+        ADD #100000,FAC1(R5)
+        BNE NUMNEG
+        CLR FAC2(R5)
+        BNE NUMPOS
+NUMFIX: TST FAC2(R5)
+        BPL NUMPOS
+        NEG FAC2(R5)
+        BVC NUMNEG
+        MOV #044000,FAC1(R5)
+        CLR FAC2(R5)
+NUMNEG: MOV #55,R0
+        BR NUMPRS
+;
+NUMPOS:
+	.IFNDF $NOSTR
+	 CMP R1,#SAVCHA
+        BEQ NUMSTT
+	.ENDC
+;
+        MOV #SPACE,R0
+NUMPRS: JSR PC,(R1)
+NUMSTT: MOV FAC2(R5),R4
+        CLR R2
+        MOV FAC1(R5),R3
+        BNE NUMFLT
+        MOV #37,R0
+        TST R4
+        BNE NUMSHF
+        MOV #'0,R0
+        JSR PC,(R1)
+        RTS PC
+;
+NUMFLT: MOV R3,R0
+        ASL R0
+        CLRB R0
+        SWAB R0
+        SUB #171,R0
+        BIC #177600,R3
+        BIS #200,R3
+NUMSHF: DEC R0
+        ASL R4
+        ROL R3
+NUMNOR: BIT R3,#40000
+        BEQ NUMSHF
+        TST R0
+        BGT NUMBIG
+        ASR R3
+        ROR R4
+        ASR R3
+        ROR R4
+        ASR R3
+        ROR R4
+        ASR R3
+        ROR R4
+        ADD #4,R0
+        JSR PC,MPYTEN
+        DEC R2
+        BR NUMNOR
+;
+NUMBIG: CMP R0,#4
+        BLE NUMOK
+NUMDIV: JSR PC,DIVTEN
+        INC R2
+        BR NUMNOR
+NUMALN: INC R0
+        ASR R3
+        ROR R4
+NUMOK:  CMP R0,#4
+        BLT NUMALN
+        CMP R3,#50000
+        BCC NUMDIV
+        ADD #1250,R4
+        BCC NORNDO
+        INC R3
+        CMP R3,#50000
+        BCS NORNDO
+        MOV #4000,R3
+        CLR R4
+        INC R2
+NORNDO: MOV #6,R0
+NUMDIG: MOV R3,-(SP)
+        SWAB(SP)
+        ROR(SP)
+        ROR(SP)
+        ROR(SP)
+        BIC #177760,(SP)
+        ADD #60,(SP)
+        BIC #174000,R3
+        JSR PC,MPYTEN
+        DEC R0
+        BGT NUMDIG
+        MOV SP,R3
+        ADD #14,R3
+        CMP R2,#177776
+        BLT NUMFM1
+        BEQ NUMFM2
+        CMP R2,#6
+        BLT NUMFM3
+NUMFM1: MOV -(R3),R0
+        JSR PC,(R1)
+        MOV #56,R0
+        JSR PC,(R1)
+        MOV #5,R4
+NUMLP1: MOV -(R3),R0
+        JSR PC,(R1)
+        DEC R4
+        BGT NUMLP1
+        MOV #105,R0
+        JSR PC,(R1)
+        MOV #53,R0
+        TST R2
+        BPL .+10
+        MOV #55,R0
+        NEG R2
+        JSR PC,(R1)
+        MOV #60,R0
+        SUB #12,R2
+        BMI .+6
+        INC R0
+        BR .-10
+        JSR PC,(R1)
+        MOV R2,R0
+        ADD #72,R0
+        JSR PC,(R1)
+        BR NUMEXI
+;
+NUMFM2: MOV #56,R0
+        JSR PC,(R1)
+        MOV #'0,R0
+        JSR PC,(R1)
+NUMFM3: MOV #6,R4
+        MOV SP,R0
+        CMP(R0)+,#'0
+        BNE .+6
+        DEC R4
+        BR .-10
+        CMP R4,R2
+        BGT .+6
+        MOV R2,R4
+        INC R4
+        INC R2
+        INC R2
+NUMLP3: DEC R2
+        BNE .+10
+        MOV #56,R0
+        JSR PC,(R1)
+        MOV -(R3),R0
+        JSR PC,(R1)
+        DEC R4
+        BGT NUMLP3
+NUMEXI: ADD #14,SP
+        RTS PC
+;
+	.IFNDF $NOSTR
+SAVCHA: JSR R5,SAVREG
+        MOV T2(R5),R1
+        MOVB R0,(R1)+
+        MOV R1,T2(R5)
+        INC T1(R5)
+        RTS PC
+	.ENDC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: PUTBYT - PUT BYTE INTO RING
+; BUFFER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	.IFNDF LSI11
+PUTBYT: MOV #PS,R2		;POINT TO PS
+        MOV (R2),-(SP)		;SAVE PSW
+        MOV #340,(R2)		;MASK INTERRUPT
+	.ENDC
+;
+	.IFDF LSI11
+PUTBYT: MFPS -(SP)		;SAVE PSW
+	MTPS #340		;MASK INTERRUPT
+	.ENDC
+;
+        MOV 10(R1),R3		;GET POINTER
+        INC R3			;INC POINTER
+        CMP R3,2(R1)		;EQ END OF QUEUE?
+        BLOS NOWRAP
+        MOV 0(R1),R3		;POINT TO START
+NOWRAP: CMP R3,4(R1)		;QUEUE FULL?
+        BEQ NOROOM
+        CMP R3,6(R1)
+        BEQ NOROOM
+        MOVB R0,@10(R1)		;PUT IN QUEUE
+        MOV R3,10(R1)		;SAVE POINTER
+      	.IFNDF LSI11
+	MOV (SP)+,(R2)		;RESTORE PSW
+        CLC
+        RTS PC
+NOROOM: MOV (SP)+,(R2)		;RESTORE PSW
+        SEC
+        RTS PC
+	.ENDC
+;
+      	.IFDF LSI11
+	MTPS (SP)+		;RESTORE PSW
+        CLC
+        RTS PC
+NOROOM: MTPS (SP)+		;RESTORE PSW
+        SEC
+        RTS PC
+	.ENDC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: PUTCHA - PUT CHAR TO CURRENT
+; OUTPUT DEVICE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PUTCHA: JSR R5,SAVREG		;SAVE REGS
+        MOV #047777,-(SP)
+        INC @COLUMN(R5)		;INC COLUMN NUMBER
+        TSTB CNCFLG(R5)		;CTRL C RECIEVED?
+        BEQ PUTCC0
+        JMP READY		;THEN JUMP TO READY
+PUTCC0: MOVB ODEV(R5),R4	;POINT TO OUTPUT DEVICE
+        BNE HDRSTU
+        TSTB CNOFLG(R5)		;CTRL 0 FLAG?
+        BNE OUT010
+HDRSTU: MOV TAB1(R4),R1
+        TST R4
+        BNE PUTIT
+        ADD R5,R1
+        MOV(R1),R1
+PUTIT:  JSR PC,PUTBYT		;PUT IN OUT QUEUE
+        BCC ITSIN
+        JSR PC,IOWAIT		;WAIT IF CANT QUEUE
+        TSTB XOFFLG(R5)		;XOFF FLAG SET?
+        BNE PUTIT		;LOOP IF XOFF
+        DEC(SP)
+        BNE PUTIT
+        CLRB 12(R1)
+        BR DEVERR
+ITSIN:  CLRB 12(R1)		;CLEAR DEVICE ERROR
+        MOV #100,@TAB2(R4)	;ENABLE INTERRUPT
+        INC RNDCT(R5)		;INC RANDOM SEED
+        TSTB 12(R1)		;ERROR SET?
+        BNE DEVERR		;DEVICE NOT READY?
+OUT010: TST(SP)+
+        RTS PC
+;
+;TABLE OF DEVICE BUFFER HEADERS
+TAB1:   .WORD TPHD
+	.IFNDF $NOPTP
+        .WORD PPBFHD
+	.ENDC
+;
+	.IFDF $NOPTP
+	.WORD 0
+	.ENDC
+;
+	.IFNDF $NOLPT
+        .WORD LPBFHD
+	.ENDC
+;
+	.IFDF $NOLPT
+	.WORD 0
+	.ENDC
+;
+;TABLE OF DEVICE STATUS REGISTERS
+TAB2:   .WORD TPS
+        .WORD PPS
+        .WORD LPS
+;
+DEVERR: IOT
+	.IFNDF $LONGER
+        .ASCII 'DNR'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'DEVICE NOT READY'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: SAVRGI - SAVE ALL REGISTERS
+; (FROM INTERRUPT CONTEXT)
+;SUBROUTINE: SAVREG - SAVE ALL REGISTERS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SAVRGI: MOV(SP),-(SP)
+        MOV #INTEXT,2(SP)
+SAVREG: MOV R4,-(SP)
+        MOV R3,-(SP)
+        MOV R2,-(SP)
+        MOV R1,-(SP)
+        MOV R0,-(SP)
+        MOV R5,-(SP)
+        MOV 14(SP),R5
+        JSR PC,@(SP)+		;STACK NEXT LOCATION
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;ROUTINE: RESREG - RESTORE ALL REGISTERS
+;NOT CALLED DIRECTLY. STACKED BY SAVREG 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+RESREG: MOV(SP)+,R0
+        MOV(SP)+,R1
+        MOV(SP)+,R2
+        MOV(SP)+,R3
+        MOV(SP)+,R4
+        MOV(SP)+,R5
+        RTS PC
+;
+INTEXT: RTI
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: SCANPN - SCAN NEXT TOKEN FOR
+; POUND SIGN '#'
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SCANPN: MOV #.SCALR,LINENO(R5)
+        INC R1			;POINT TO NEXT
+        CMPB(R1)+,#.PND		;IS IT '#'
+        BEQ PNDGO
+        JMP ERRSX5		;SYNTAX ERROR
+PNDGO:  RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: SKIPEL - SKIP TO END OF LINE
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SKIP05: ADD #3,R1		;SKIP 5 BYTES
+SKIP02: INC R1			;SKIP 1 BYTES
+SKIP01: INC R1			;SKIP 1 BYTE
+SKIPEL: TSTB(R1)+		;GET NEXT TOKEN
+        BGE SKIP01		;NOT A TOKEN?
+        CMPB -(R1),#.FLIT	;IS IT LITERAL
+        BEQ SKIP05
+        BHI SKIPHI
+        CMPB(R1)+,#.EOL		;IS IT EOL
+        BEQ SKIPRT
+        CMPB -(R1),#.FN		;USER FUNCTION
+        BEQ SKIP02
+        CMPB(R1)+,#.NEXT	;'NEXT' TOKEN
+        BNE SKIPEL
+        ADD #12,R1		;SKIP 12 BYTES
+        BR SKIPEL
+;
+SKIPHI: CMPB(R1)+,#.ILIT2	;IS IT ILIT2
+        BEQ SKIP02		;THEN SKIP 2
+        BCS SKIP01		;ELSE SKIP 1
+SKIPTX: TSTB(R1)+
+        BNE SKIPTX		;SKIP TILL ZERO BYTE
+        BR SKIPEL
+;
+SKIPRT: RTS PC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: STOVAR - STORE NUMERIC VARIABLE
+; ADDRESSED BY VARSAV(R5)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+STOVAR: MOV VARSAV(R5),R2
+;
+	.IFNDF $NOSTR
+        CMP(R2),#.SVAR
+        BEQ ERRMX7
+	.ENDC
+;
+        MOV SS1SAV(R5),R0
+        BMI STONOS
+        MOV SS2SAV(R5),R3
+        JSR PC,LOCGET
+        BR STOCOM
+;
+STONOS: CMP(R2)+,#.SCALR
+        BEQ STOCOM
+        MOV(R2),R2
+STOCOM: MOV FAC1(R5),(R2)+
+        MOV FAC2(R5),(R2)
+        RTS PC
+;
+	.IFNDF $NOSTR
+ERRMX7: JMP ERRMIX
+	.ENDC
+;
+	.IFNDF $NOSTR
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: STOSVA - STORE STRING VARIABLE
+; ADDRESSED BY VARSAV(R5)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+STOSVA: MOV VARSAV(R5),R2
+        CMP(R2),#.SVAR
+        BNE ERRMX6
+        MOV SS1SAV(R5),R0
+        BMI STOSSN
+        MOV SS2SAV(R5),R3
+        JSR PC,LOCGET
+        BR STOMMC
+;
+STOSSN: TST(R2)+
+        CMP 2(R2),#177777
+        BEQ STOVTA
+        MOV(R2),R2
+STOMMC: MOV(SP)+,R3
+        MOV(SP)+,R0
+        MOV R0,(R2)
+        BR STOVCO
+;
+STOVTA: MOV(SP)+,R3
+        MOV(SP)+,R0
+        MOV R0,(R2)
+        INC R2
+        SUB(R5),R2
+STOVCO: INC R0
+        BEQ STOSX1
+        ADD #2,R0
+        MOVB R2,-(R0)
+        SWAB R2
+        MOVB R2,-(R0)
+STOSX1: JMP(R3)
+;
+ERRMX6: JMP ERRMIX
+	.ENDC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: SUBSTK - NEGATE TOP OF STACK
+; THEN ADD 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+SUBSTK: TST 2(SP)
+        BEQ SUBINT
+        ADD #100000,2(SP)
+ADSTK1: JMP ADDSTK
+;
+SUBINT: NEG 4(SP)
+        BVC ADSTK1
+        MOV #44000,2(SP)
+        CLR 4(SP)
+        BR ADSTK1
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: TRAN - TRANSLATE LINE TO TOKENS
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+TRAN:   MOV LINE(R5),R2
+        MOV R2,R1
+        CMPB(R1)+,#CRET
+        BNE .-4
+        MOV CODE(R5),R0
+        MOVB -(R1),-(R0)
+        CMP R1,R2
+        BNE .-4
+        CLR T3(R5)		;jcl
+TRANLU: CLR T1(R5)
+TRANVA: CMPB(R0)+,#SPACE
+        BEQ TRANVA
+        CMPB -(R0),#CRET
+        BNE TRYNUM
+        MOVB #.EOL,(R1)
+        RTS PC
+;
+TRYNUM: CMPB(R0),#56
+        BEQ NUMJMP
+        CMPB(R0),#'0
+        BCS TRYKWD
+        CMPB(R0),#'9
+        BHI TRYKWD
+NUMJMP: JMP ISNUM
+;
+TRYKWD: MOV #KEYWDS-TRNPC,R4
+        CMPB(R0),#'A
+        BCS COMTAB
+        CMPB(R0),#'Z
+        BHI COMTAB
+        MOV #KEYA-TRNPC,R4
+        CLR T3(R5)		;jcl
+COMTAB: MOV PC,R3
+TRNPC:  ADD R4,R3
+TRYAGN: MOV R0,R2
+RETRY:  CMPB(R2)+,(R3)+
+        BEQ RETRY
+        MOVB -(R3),R4
+        BMI AMATCH
+        BEQ NOTKWD
+        DEC R2
+        CMPB(R2)+,#SPACE
+        BEQ RETRY
+        DEC R2
+        CMPB(R3)+,#SPACE
+        BEQ RETRY
+        TSTB(R3)+
+        BPL .-2
+        BR TRYAGN
+;
+AMATCH: DEC R2
+        MOV R2,R0
+        MOVB R4,(R1)+
+        CMPB R4,#.REM
+        BEQ REMPAC
+        CMPB R4,#.FN
+        BEQ TRNFN
+        CMPB R4,#.NEXT
+        BEQ NEXFIL
+        CMPB R4,#.SQUOT
+        BEQ QUOTPA
+        CMPB R4,#.DQUOT
+        BNE TRANLU
+QUOTPA: CMPB #.SQUOT,R4
+        BEQ .+6
+        MOV #.SQUOT-5,R4
+        ADD #47-.SQUOT,R4
+        MOVB #.TEXT,(R1)+
+        CMP R1,R0
+        BCC ERRTRN
+STOSTR: CMPB(R0),R4
+        BEQ ENDQUO
+        CMPB(R0),#CRET
+        BEQ ENDCR
+        MOVB(R0)+,(R1)+
+        BR STOSTR
+;
+ENDQUO: CLRB(R1)+
+        INC R0
+        CMPB R4,#000047
+        BEQ ENDSQU
+        MOVB #.DQUOT,(R1)+
+        BR TRANLU
+;
+ENDSQU: MOVB #.SQUOT,(R1)+
+        BR TRANLU
+;
+ENDCR:  CLRB(R1)+
+        MOVB #.EOL,(R1)
+        MOV R1,R2
+        CMPB -(R2),#.TEXT
+        BNE .-4
+        MOVB R4,(R2)
+        MOVB #.TEXT,-(R2)
+        RTS PC
+;
+TRNFN:  CMPB(R0)+,#SPACE
+        BEQ TRNFN
+        CMPB -(R0),#'A
+        BCS TRFNBA
+        CMPB(R0),#'Z
+        BHI TRFNBA
+        MOVB(R0)+,R2
+        ASL R2
+        SUB #000200,R2
+        MOVB R2,(R1)+
+        BR TRANLU
+;
+TRFNBA: MOVB #'N,-(R0)
+        MOVB #'F,-(R0)
+        DEC R1
+        CMP R1,R0
+        BHI ERRTRN
+        BR REMPAC
+;
+NEXFIL: CMP R1,R0
+        BCC ERRTRN
+        CLRB(R1)+
+        CLRB(R1)
+        ADD #11,R1
+        CMP R1,R0
+        BCC ERRTRN
+        JMP TRANLU
+;
+ERRTRN: JMP ERRTPC
+;
+NOTKWD: CMPB(R0),#'Z
+        BHI REMPAC
+        CMPB(R0),#'A
+        BCS REMPAC
+        TST T1(R5)
+        BEQ ISVAR
+REMPAC: MOVB #.TEXT,(R1)+
+        CMP R1,R0
+        BCC ERRTRN
+STOTXT: CMPB(R0),#CRET
+        BEQ CARRET
+        MOVB(R0)+,(R1)+
+        BR STOTXT
+;
+CARRET: CLRB(R1)+
+        MOVB #.EOL,(R1)
+        RTS PC
+;
+ISVAR:  MOVB(R0)+,R2
+        CMPB(R0)+,#SPACE
+        BEQ .-4
+        CMPB -(R0),#'9
+        BHI NODIG1
+        CMPB(R0),#'0
+        BCS NODIG1
+        SWAB R2
+        BISB(R0)+,R2
+        SWAB R2
+NODIG1: MOV(R5),R3
+        CMPB(R0)+,#SPACE
+        BEQ .-4
+        DEC R0
+VARSRC: CMP R3,LOFREE(R5)
+        BCC PUTITI
+        CMP(R3),#.SCALR
+        BCC NOTIT
+        ADD #4,R3
+        BR VARSRC
+;
+NOTIT:  ADD #10,R3
+;
+	.IFNDF $NOSTR
+        CMP 177770(R3),#.SVAR
+        BEQ TRYSVA
+	.ENDC
+;
+        CMP(R3)+,R2
+        BNE VARSRC
+        CMPB(R0),#'$
+        BEQ VARSRC
+;
+	.IFNDF $NOSTR
+        BR FOUNDV
+;
+TRYSVA: CMP(R3)+,R2
+        BNE VARSRC
+        CMPB(R0),#'$
+        BNE VARSRC
+        INC R0
+	.ENDC
+;
+
+FOUNDV: SUB #12,R3
+        BR RETVAR
+;
+PUTITI:
+;
+	.IFNDF $NOSTR
+	ADD #14,R3
+        CMP R3,LOSTR(R5)
+        BCS PUTACK
+        JSR PC,UPPACK
+        CMP R3,LOSTR(R5)
+        BCC ERROV2
+PUTACK: TST -(R3)
+	.ENDC
+;
+	.IFDF $NOSTR
+	ADD #12,R3
+	.ENDC
+;
+        CMP R3,HIFREE(R5)
+        BHI ERROV2
+        MOV R3,LOFREE(R5)
+        MOV R2,-(R3)
+        CLR -(R3)
+        CLR -(R3)
+        CLR -(R3)
+        MOV #.SCALR,-(R3)
+;
+	.IFNDF $NOSTR
+        CMPB(R0),#'$
+        BNE RETVAR
+        INC R0
+        MOV #.SVAR,(R3)+
+        COM(R3)+
+        COM(R3)+
+        COM(R3)
+        SUB #6,R3
+	.ENDC
+;
+RETVAR: MOV R5,T1(R5)
+RETLNO: SUB(R5),R3
+        SWAB R3
+        MOVB R3,(R1)+
+        SWAB R3
+        MOVB R3,(R1)+
+        CMP R1,R0
+        BHI ERRTRN
+        JMP TRANVA
+;
+ISNUM:  MOV R0,-(SP)
+        JSR PC,VAL
+        CMPB(R0),#'.
+        BNE EXPTEN
+        MOV(SP)+,R0
+        BR REMPAC
+;
+ERRTPC: JSR R1,MSGERR
+;
+	.IFNDF $LONGER
+        .ASCII 'TLT'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'TOO LONG TO TRANSLATE'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+        JMP READY2
+;
+ERROV2: JSR R1,MSGERR
+;
+	.IFNDF $LONGER
+        .ASCII 'PTB'
+	.ENDC
+	.IFDF $LONGER
+	.ASCII 'PROGRAM TOO BIG'
+	.ENDC
+        .BYTE 0
+        .EVEN
+;
+        JMP READY2
+;
+EXPTEN: CMP R3,#14630
+        BHI MAKFL1
+        TST R2
+        BLE EXPNEG
+        JSR PC,MPYTEN
+        DEC R2
+        BR EXPTEN
+;
+EXPNEG: BNE MAKFL1
+        TST R3
+        BNE MAKFL1
+        CMP R4,#.SCALR
+        BCC MAKFL1
+        MOV LINE(R5),R3
+        DEC R1
+        CMP R1,R3
+        BCS MAKLNO
+        TST T3(R5)		;jcl
+        BEQ EXPNE1		;jcl
+        CMPB (R1),#.COMA	;jcl
+        BEQ MAKLNO		;jcl
+EXPNE1: CMPB(R1),#.GOSUB	;jcl
+        BEQ SETT3		;jcl
+        CMPB(R1),#.GOTO
+        BEQ SETT3		;jcl
+        CMPB(R1),#.CALL
+        BEQ MAKLNO
+        CMPB(R1),#.THEN
+        BEQ SETT3		;jcl
+        CMPB(R1),#.LIST
+        BEQ MAKLNO
+        INC R1
+        CLR R3
+        TST R4
+        BLT MAKFL1
+        CMP R4,#377
+        BGT MAKEIZ
+LITZER: MOVB #.ILIT1,(R1)+
+        BR MAKE0K
+;
+MAKEIZ: MOVB #.ILIT2,(R1)+
+LITCOM: SWAB R4
+        CMP R1,R0
+        BCC TRNER4
+        MOVB R4,(R1)+
+        SWAB R4
+MAKE0K: MOVB R4,(R1)+
+        TST(SP)+
+        CMP R1,R0
+        BHI TRNER4
+        JMP TRANLU
+;
+TRNER4: JMP ERRTRN
+ERROV3: JMP ERROV2
+;
+SETT3:  MOV R5,T3(R5)		;jcl
+MAKLNO: INC R1
+        MOV(R5),R3
+LNOSRC: CMP R3,LOFREE(R5)
+        BCC STOLNO
+        CMP(R3),#.SCALR
+        BCS ISLNO
+        ADD #12,R3
+        BR LNOSRC
+;
+ISLNO:  CMP(R3),R4
+        BEQ FOUNDL
+        ADD #4,R3
+        BR LNOSRC
+;
+STOLNO:
+	.IFDF $NOSTR
+	ADD #4,R3
+	.ENDC
+;
+	.IFNDF $NOSTR
+	 ADD #6,R3
+        CMP R3,LOSTR(R5)
+        BCS STOAOK
+        JSR PC,UPPACK
+        CMP R3,LOSTR(R5)
+        BCC ERROV3
+STOAOK: TST -(R3)
+	.ENDC
+;
+        CMP R3,HIFREE(R5)
+        BHI ERROV3
+        MOV R3,LOFREE(R5)
+        CLR -(R3)
+        MOV R4,-(R3)
+FOUNDL: TST(SP)+
+        JMP RETLNO
+;
+MAKFL1: TST R3
+        BNE CALNRM
+        TST R4
+        BEQ LITZER
+CALNRM: JSR PC,NORM
+        MOVB #.FLIT,(R1)+
+        SWAB R3
+        CMP R1,R0
+        BCC TRNER4
+        MOVB R3,(R1)+
+        SWAB R3
+        MOVB R3,(R1)+
+        BR LITCOM
+;
+	.IFNDF $NOSTR
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: UPPACK - PACK STRING STORAGE
+; TOWARD TOP
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+UPPACK: MOV R1,-(SP)
+        MOV R2,-(SP)
+        MOV R3,-(SP)
+        CLR -(SP)
+        MOV HISTR(R5),R1
+        MOV HIFREE(R5),R2
+        MOV R2,HISTR(R5)
+UPPLOO: CLR(SP)
+        BISB -(R1),(SP)
+        BNE UPPNZR
+UPPBAD: CMP R1,LOSTR(R5)
+        BHI UPPLOO
+        MOV R2,LOSTR(R5)
+        TST(SP)+
+        MOV(SP)+,R3
+        MOV(SP)+,R2
+        MOV(SP)+,R1
+        RTS PC
+;
+UPPNZR: SUB(SP),R1
+        CLR R3
+        BISB -(R1),R3
+        SWAB R3
+        BISB -(R1),R3
+        SWAB R3
+        DEC R1
+        BIT R3,#1
+        BEQ .+6
+        DEC R3
+        ADD(R5),R3
+        CMP R3,PDL(R5)
+        BCC UPPBAD
+        CMP R3,SP
+        BCC UPPGOO
+        CMP R3,ARRAYS(R5)
+        BHI UPPBAD
+        CMP R3,HIFREE(R5)
+        BHI UPPGOO
+        CMP R3,LOFREE(R5)
+        BCC UPPBAD
+        CMP R3,(R5)
+        BCS UPPBAD
+UPPGOO: ADD #4,(SP)
+        CMP(R3),R1
+        BNE UPPBAD
+        ADD(SP),R1
+        SUB R1,(R3)
+        ADD R2,(R3)
+        MOVB -(R1),-(R2)
+        DEC(SP)
+        BGT .-4
+        BR UPPBAD
+	.ENDC
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;SUBROUTINE: VAL - CONVERT ASCII STRING
+; TO VALUE IN R3,R4 EXPONENT IN R2
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+VAL:    CLR R2
+        CLR R3
+        CLR R4
+NUDIGI: CMPB(R0)+,#SPACE
+        BEQ NUDIGI
+        CMPB -(R0),#'0
+        BCS NOTDIG
+        CMPB(R0),#'9
+        BHI NOTDIG
+        CMP R3,#014630
+        BLOS CANFIT
+        INC R0
+        TST R2
+        BLT NUDIGI
+        INC R2
+        BR NUDIGI
+;
+CANFIT: JSR PC,MPYTEN
+        CLR -(SP)
+        MOVB(R0)+,(SP)
+        SUB #'0,(SP)
+        ADD(SP)+,R4
+        ADC R3
+        TST R2
+        BEQ NUDIGI
+        INC R2
+        BR NUDIGI
+;
+NOTDIG: CMPB(R0)+,#'.
+        BNE DOTBAD
+        TST R2
+        BNE DOTROT
+        MOV #100000,R2
+        BR NUDIGI
+;
+DOTROT: BGT DOTIGN
+DOTIGN: CMPB(R0)+,#SPACE
+        BEQ DOTIGN
+        CMPB -(R0),#'0
+        BCS PASTDO
+        CMPB(R0),#'9
+        BHI PASTDO
+        INC R0
+        BR DOTIGN
+;
+PASTDO: CMPB(R0)+,#'.
+        BEQ DOTBAD
+DOTBAD: CLR -(SP)
+        CMPB -(R0),#'E
+        BNE NOEXPO
+        CMP R1,LINE(R5)
+        BEQ NOEXPO
+        INC R0
+        CMPB(R0),#SPACE
+        BEQ .-6
+        CMPB(R0)+,#'+
+        BEQ EXPDIG
+        CMPB -(R0),#'-
+        BNE EXPDIG
+        INC R0
+        MOV #100000,(SP)
+EXPDIG: CMPB(R0)+,#SPACE
+        BEQ EXPDIG
+        CMPB -(R0),#'0
+        BCS EXPDUN
+        CMPB(R0),#'9
+        BHI EXPDUN
+        MOV(SP),-(SP)
+        ASL(SP)
+        ASL(SP)
+        ADD 2(SP),(SP)
+        ASL(SP)
+        BIC #077777,2(SP)
+        ADD(SP)+,(SP)
+        CLR -(SP)
+        MOVB(R0)+,(SP)
+        ADD(SP)+,(SP)
+        SUB #'0,(SP)
+        BR EXPDIG
+;
+EXPDUN: TST(SP)
+        BGE NOEXPO
+        BIC #100000,(SP)
+        NEG(SP)
+NOEXPO: TST R2
+        BGE EXPOK
+        BIC #100000,R2
+        NEG R2
+EXPOK:  ADD(SP)+,R2
+        RTS PC
+;
+	.IFNDF $NOPTP
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PAPER TAPE READER BUFFER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PRBFHD: .WORD PRBUF
+        .WORD PRBEND
+        .WORD PRBUF
+        .WORD 0
+        .WORD PRBUF
+        .WORD 0
+PRBUF=.
+.=.+$PRBSZ
+PRBEND=.-1
+;
+        .EVEN
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;PAPER TAPE PUNCH BUFFER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+PPBFHD: .WORD PPBUF
+        .WORD PPBEND
+        .WORD PPBUF
+        .WORD 0
+        .WORD PPBUF
+        .WORD 0
+PPBUF=.
+.=.+$PPBSZ
+PPBEND=.-1
+;
+        .EVEN
+	.ENDC
+;
+	.IFNDF $NOLPT
+;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;LINE PRINTER BUFFER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+LPBFHD: .WORD LPBUF
+        .WORD LPBEND
+        .WORD LPBUF
+        .WORD 0
+        .WORD LPBUF
+        .WORD 0
+LPBUF=.
+.=.+$LPBSZ
+LPBEND=.-1
+;
+        .EVEN
+	.ENDC
+;
+        .END
+
