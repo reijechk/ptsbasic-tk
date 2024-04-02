@@ -1,0 +1,104 @@
+; A PTS11 IOX Example
+;
+; The program prompts for a string of up to 64 characters
+; (100 octal). Upon recipt of a newline, the string is
+; written to the console in reverse order. I/O is performed
+; using the PTS11 IOX library.
+;
+; Original implementation, created for the absolute
+; assembler, required the IOX binary tape to be loaded
+; each time, before this program was loaded and run.
+; NG 13-JAN-2024  (PROG5A)
+;
+; Revised for the relocatable assembler so an object
+; library version of IOX can be linked together with this
+; program into a single, binary tape.
+; NG 21-JAN-2024 (PROG5B)
+;
+; Cleanup for rebuild using the alternate tape set which
+; is compatable with the PDP 11/70
+;
+; NG 28-JAN-2024 (PROG5C)
+;
+; ----------------------------------
+	.TITLE PROG5C
+;
+; THIS IS NOW SET AT LINK TIME
+;        .=2000   ; PROGRAM ORIGIN
+;
+; DEFINE A FEW CONVENIENT REGISTER NAMES
+        R0=%0
+        R1=%1
+        R2=%2
+        R3=%3
+;
+; DEFINE A FEW ACSII CONTROL CHARACTERS
+	CR=15
+	LF=12
+;
+; DEFINE IOX COMMAND CODES
+        RESET=2
+        READ=11
+        WAITR=4
+        WRITE=12
+;
+; DEFINE DEVICE SLOT ALIAS
+        TTI=0    ; CONSOLE/TELEPRINTER INPUT
+        TTO=1    ; CONSOLE/TELEPRINTER OUTPUT
+;
+; INITIALIZE IOX
+START:  IOT
+        .WORD   0
+        .BYTE   RESET,0
+;
+; READ FROM CONSOLE/TELEPRINTER KEYBOARD
+; INTO BUFFER UNTIL EOL OR BUFFER FULL
+RERUN:  IOT
+	MSG
+	.BYTE	WRITE,TTO
+;
+	IOT
+        .WORD   BUFFER
+        .BYTE   READ,TTI
+;
+WAIT:   IOT
+        .WORD   WAIT
+        .BYTE   WAITR,TTI
+;
+; REVERSE THE ORDER OF THE CHARS IN THE BUFFER
+;
+        MOV     #BUFFER+6,R0  ; R0 = BUFFER DATA ADDRESS
+        MOV     R0,R1         ; R1 = R0      
+        ADD     BUFFER+4,R1   ; R1 += CHAR COUNT
+        DEC     R1            ; R1 -= 1, SKIP CR 
+LOOP1:  MOVB    -(R1),R3      ; R1 -= 1. SKIP LF, R3 = (R1)
+        MOVB    (R0),(R1)     ; (R1) = (R0)
+        MOVB    R3,(R0)+      ; (R0) = R3, R0 += 1
+        CMP     R1,R0         ; IF R1>R0 GOTO LOOP1
+        BGT     LOOP1         ;
+;
+; WRITE BUFFER TO CONSOLE/TELEPRINTER
+;
+        IOT
+        .WORD   BUFFER
+        .BYTE   WRITE,TTO
+
+WAIT2:  IOT
+        .WORD   WAIT2
+        .BYTE   WAITR,TTO
+
+        BR      RERUN
+;
+BUFFER: 100         ; BUFFER SIZE IN BYTES
+        0           ; ASCII FORMAT DATA
+        0           ; BYTE COUNT (FROM READ OPERATION)
+        .=.+100     ; INFORM ASSEMBLER TO RESERVE 100 BYTES
+;
+MSG:	.WORD	0,0
+MSGBC:	MSGEND-MSGBC-2
+	.BYTE	CR,LF
+	.ASCII /Enter a string (64 characters max.):/
+	.BYTE	CR,LF
+MSGEND:	.EVEN
+;
+        .END    START
